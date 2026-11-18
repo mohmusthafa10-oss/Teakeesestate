@@ -1,0 +1,6 @@
+{
+  "name": "Verdant Realty CRM",
+  "description": "Centralized real estate agency CRM for managing properties, sellers, buyer matching, running listings, follow-ups, deals, investments, and rentals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
