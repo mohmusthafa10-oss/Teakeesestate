@@ -519,15 +519,24 @@ export const ReportsPage: React.FC = () => {
         {/* Right Report Output */}
         <div className="lg:col-span-9 space-y-5">
           <div className="bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl p-6 space-y-4">
-            <div className="border-b border-[#E5E4DA] pb-4 flex items-start justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-[#77796F]">
-                  {db.settings.agencyName} · Period {formatDate(dateFrom)} – {formatDate(dateTo)}
-                </p>
-                <h2 className="text-lg font-semibold text-[#20251F] mt-0.5">
-                  {reportData.title}
-                </h2>
-                <p className="text-xs text-[#77796F]">{reportData.subtitle}</p>
+            <div className="border-b border-[#E5E4DA] pb-4 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                {db.settings.logoUrl && (
+                  <img
+                    src={db.settings.logoUrl}
+                    alt={`${db.settings.agencyName} logo`}
+                    className="w-10 h-10 rounded-full object-cover border border-[#E5E4DA] bg-[#FFFFFF] shrink-0"
+                  />
+                )}
+                <div>
+                  <p className="text-[11px] font-medium text-[#77796F]">
+                    {db.settings.agencyName} · Period {formatDate(dateFrom)} – {formatDate(dateTo)}
+                  </p>
+                  <h2 className="text-lg font-semibold text-[#20251F] mt-0.5">
+                    {reportData.title}
+                  </h2>
+                  <p className="text-xs text-[#77796F]">{reportData.subtitle}</p>
+                </div>
               </div>
             </div>
 

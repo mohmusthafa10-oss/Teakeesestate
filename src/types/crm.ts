@@ -312,6 +312,7 @@ export interface ActivityLog {
 export interface AgencySettings {
   agencyName: string;
   agencyTagline: string;
+  logoUrl?: string;
   currencySymbol: string;
   defaultCommissionRate: number;
   propertyCategories: PropertyType[];

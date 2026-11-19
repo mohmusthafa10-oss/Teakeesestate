@@ -24,6 +24,7 @@ import {
 import { generateId, getTodayISO } from '../utils/formatters';
 
 const STORAGE_KEY = 're_crm_database_v1';
+export const DEFAULT_LOGO_URL = '/assets/aistudio/image_abc712d4.png';
 
 function loadDatabase(): CRMDatabase {
   try {
@@ -38,6 +39,10 @@ function loadDatabase(): CRMDatabase {
       const seed = createSeedDatabase();
       localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
       return seed;
+    }
+    if (parsed.settings.logoUrl === undefined) {
+      parsed.settings.logoUrl = DEFAULT_LOGO_URL;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
     }
     return parsed;
   } catch {

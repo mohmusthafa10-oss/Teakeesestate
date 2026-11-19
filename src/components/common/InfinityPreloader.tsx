@@ -43,11 +43,18 @@ export const InfinityPreloader: React.FC<{ visible: boolean }> = ({ visible }) =
             />
           </svg>
         </div>
-        <div className="text-center">
+        <div className="text-center flex flex-col items-center gap-1.5">
+          {db.settings.logoUrl && (
+            <img
+              src={db.settings.logoUrl}
+              alt={`${db.settings.agencyName} logo`}
+              className="w-10 h-10 rounded-full object-cover border border-[#E5E4DA] bg-[#FFFFFF]"
+            />
+          )}
           <p className="text-sm font-semibold tracking-tight text-[#20251F]">
             {db.settings.agencyName}
           </p>
-          <p className="mt-0.5 text-xs text-[#77796F]">
+          <p className="text-xs text-[#77796F]">
             Synchronizing property records
           </p>
         </div>

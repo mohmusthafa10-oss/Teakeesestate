@@ -161,16 +161,24 @@ export const Sidebar: React.FC<{
           onClick={() => handleNavClick('dashboard')}
           className="flex items-center gap-2.5 text-left group whitespace-nowrap shrink-0 focus:outline-none cursor-pointer"
         >
-          <div className="w-8 h-8 rounded-lg bg-[#064E3B] flex items-center justify-center text-[#FFFFFF] shrink-0">
-            <svg width="20" height="10" viewBox="0 0 124 62" fill="none" aria-hidden="true">
-              <path
-                d="M32 13C19.85 13 10 21.5 10 31C10 40.5 19.85 49 32 49C47 49 55 31 62 31C69 31 77 13 92 13C104.15 13 114 21.5 114 31C114 40.5 104.15 49 92 49C77 49 69 31 62 31C55 31 47 13 32 13Z"
-                stroke="currentColor"
-                strokeWidth="9"
-                strokeLinecap="round"
-              />
-            </svg>
-          </div>
+          {db.settings.logoUrl ? (
+            <img
+              src={db.settings.logoUrl}
+              alt={`${db.settings.agencyName} logo`}
+              className="w-10 h-10 rounded-full object-cover border border-[#E5E4DA] shrink-0 bg-[#FFFFFF]"
+            />
+          ) : (
+            <div className="w-9 h-9 rounded-lg bg-[#064E3B] flex items-center justify-center text-[#FFFFFF] shrink-0">
+              <svg width="20" height="10" viewBox="0 0 124 62" fill="none" aria-hidden="true">
+                <path
+                  d="M32 13C19.85 13 10 21.5 10 31C10 40.5 19.85 49 32 49C47 49 55 31 62 31C69 31 77 13 92 13C104.15 13 114 21.5 114 31C114 40.5 104.15 49 92 49C77 49 69 31 62 31C55 31 47 13 32 13Z"
+                  stroke="currentColor"
+                  strokeWidth="9"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </div>
+          )}
           <div className="min-w-0">
             <span className="text-[15px] font-semibold tracking-tight text-[#20251F] group-hover:text-[#064E3B] transition-colors block truncate">
               {db.settings.agencyName}

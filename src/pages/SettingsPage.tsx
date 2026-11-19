@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Lock, Plus, RotateCcw, ShieldCheck, UserPlus } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Image as ImageIcon, Lock, Plus, RotateCcw, ShieldCheck, Trash2, Upload, UserPlus } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
-import { crmService } from '../services/crmService';
+import { crmService, DEFAULT_LOGO_URL } from '../services/crmService';
 import { PropertyType, UserRole } from '../types/crm';
 import { ConfirmDialog, Modal } from '../components/common/UIPrimitives';
 
@@ -10,6 +10,7 @@ export const SettingsPage: React.FC = () => {
 
   const [agencyName, setAgencyName] = useState(db.settings.agencyName);
   const [agencyTagline, setAgencyTagline] = useState(db.settings.agencyTagline);
+  const [logoUrl, setLogoUrl] = useState(db.settings.logoUrl ?? DEFAULT_LOGO_URL);
   const [currencySymbol, setCurrencySymbol] = useState(db.settings.currencySymbol);
   const [defaultCommission, setDefaultCommission] = useState(
     String(db.settings.defaultCommissionRate)
@@ -31,6 +32,82 @@ export const SettingsPage: React.FC = () => {
 
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
+  useEffect(() => {
+    setAgencyName(db.settings.agencyName);
+    setAgencyTagline(db.settings.agencyTagline);
+    setLogoUrl(db.settings.logoUrl ?? '');
+    setCurrencySymbol(db.settings.currencySymbol);
+    setDefaultCommission(String(db.settings.defaultCommissionRate));
+    setDefaultTime(db.settings.followUpDefaults.defaultTime);
+    setReminderWindow(String(db.settings.followUpDefaults.reminderWindowHours));
+  }, [db.settings]);
+
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!isAdmin) {
+      notify('Only Admin users can update the agency logo.', 'error');
+      return;
+    }
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      notify('Please upload a valid image file (PNG, JPG, WebP, or SVG).', 'error');
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      notify('Logo file must be smaller than 4 MB.', 'error');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== 'string') return;
+
+      // Optimize large raster logos to keep localStorage fast
+      if (file.type === 'image/svg+xml') {
+        setLogoUrl(result);
+        updateDb(
+          (prev) => crmService.updateSettings(prev, { logoUrl: result }),
+          'Agency logo updated'
+        );
+        return;
+      }
+
+      const img = new window.Image();
+      img.onload = () => {
+        const maxDim = 256;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const optimized = canvas.toDataURL('image/png');
+          setLogoUrl(optimized);
+          updateDb(
+            (prev) => crmService.updateSettings(prev, { logoUrl: optimized }),
+            'Agency logo uploaded and applied'
+          );
+        } else {
+          setLogoUrl(result);
+          updateDb(
+            (prev) => crmService.updateSettings(prev, { logoUrl: result }),
+            'Agency logo uploaded and applied'
+          );
+        }
+      };
+      img.onerror = () => {
+        notify('Could not process the selected image file.', 'error');
+      };
+      img.src = result;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   const handleSaveCompany = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) {
@@ -42,6 +119,7 @@ export const SettingsPage: React.FC = () => {
         crmService.updateSettings(prev, {
           agencyName: agencyName.trim() || 'Real Estate CRM',
           agencyTagline: agencyTagline.trim(),
+          logoUrl,
           currencySymbol: currencySymbol.trim() || '₹',
           defaultCommissionRate: Number(defaultCommission) || 2,
           followUpDefaults: {
@@ -96,9 +174,84 @@ export const SettingsPage: React.FC = () => {
             Company & Follow-up Configuration
           </h2>
           <p className="text-xs text-[#77796F]">
-            Update the application name and default operating parameters without changing code.
+            Upload your brand logo, update the application name, and set default operating parameters.
           </p>
         </div>
+
+        {/* Agency Logo Upload */}
+        <div className="p-4 rounded-xl bg-[#F1F0E8]/60 border border-[#E5E4DA] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            {logoUrl ? (
+              <img
+                src={logoUrl}
+                alt={`${agencyName} logo preview`}
+                className="w-16 h-16 rounded-full object-cover border border-[#E5E4DA] bg-[#FFFFFF] shrink-0"
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-[#E4EBE0] border border-[#E5E4DA] flex items-center justify-center text-[#064E3B] shrink-0">
+                <ImageIcon className="w-6 h-6" />
+              </div>
+            )}
+            <div>
+              <p className="text-xs font-semibold text-[#20251F]">Agency Brand Logo</p>
+              <p className="text-[11px] text-[#77796F] mt-0.5">
+                Displayed in the navigation sidebar, preloader, and exported reports. Supports PNG, JPG, SVG, or WebP.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <label
+              className={`h-9 px-3.5 rounded-lg bg-[#064E3B] hover:bg-[#176B50] text-xs font-medium text-[#FFFFFF] inline-flex items-center gap-1.5 transition-colors ${
+                isAdmin ? 'cursor-pointer' : 'opacity-50 pointer-events-none'
+              }`}
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Upload Logo
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                disabled={!isAdmin}
+                onChange={handleLogoUpload}
+                className="hidden"
+              />
+            </label>
+            {logoUrl !== DEFAULT_LOGO_URL && (
+              <button
+                type="button"
+                disabled={!isAdmin}
+                onClick={() => {
+                  setLogoUrl(DEFAULT_LOGO_URL);
+                  updateDb(
+                    (prev) =>
+                      crmService.updateSettings(prev, { logoUrl: DEFAULT_LOGO_URL }),
+                    'Default logo restored'
+                  );
+                }}
+                className="h-9 px-3 rounded-lg border border-[#E5E4DA] bg-[#FFFFFF] hover:bg-[#E4EBE0]/50 text-xs font-medium text-[#20251F] cursor-pointer disabled:opacity-50"
+              >
+                Use Default
+              </button>
+            )}
+            {logoUrl && (
+              <button
+                type="button"
+                disabled={!isAdmin}
+                onClick={() => {
+                  setLogoUrl('');
+                  updateDb(
+                    (prev) => crmService.updateSettings(prev, { logoUrl: '' }),
+                    'Agency logo removed'
+                  );
+                }}
+                className="h-9 px-3 rounded-lg border border-[#E5E4DA] bg-[#FFFFFF] hover:bg-[#C96C60]/10 text-xs font-medium text-[#C96C60] inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>
             <label className="block text-xs font-medium mb-1">

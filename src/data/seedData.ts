@@ -1079,8 +1079,9 @@ export function createSeedDatabase(): CRMDatabase {
       },
     ],
     settings: {
-      agencyName: 'Verdant Realty',
+      agencyName: 't Estates',
       agencyTagline: 'Advisory · Brokerage · Managed Stays',
+      logoUrl: '/assets/aistudio/image_abc712d4.png',
       currencySymbol: '₹',
       defaultCommissionRate: 2.0,
       propertyCategories: [
