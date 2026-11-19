@@ -13,12 +13,35 @@ export interface User {
 }
 
 export type PropertyType =
-  | 'Plot / Land'
+  | 'Land'
+  | 'House'
+  | 'Apartment'
   | 'Villa'
-  | 'Flat / Apartment'
-  | 'Agriculture'
+  | 'Shop'
+  | 'Resort';
+
+export type PropertyCategory =
+  | 'Residential'
   | 'Commercial'
+  | 'Plantation'
+  | 'Agricultural'
+  | 'Development'
+  | 'Resort';
+
+export type SellerRelationship =
+  | 'Owner'
+  | 'Co-owner'
+  | 'Relative'
+  | 'Power of Attorney Holder'
+  | 'Broker / Agent'
+  | 'Authorized Representative'
   | 'Other';
+
+export type ContactMethod = 'Call' | 'WhatsApp' | 'Meeting' | 'Email' | 'Other';
+
+export type AdvancePaymentMethod = 'Cash' | 'UPI' | 'Bank Transfer' | 'Cheque' | 'Other';
+
+export type AdvanceStatus = 'Collected' | 'Adjusted' | 'Refunded' | 'Partially Refunded';
 
 export type PropertyStatus =
   | 'Available'
@@ -58,6 +81,36 @@ export interface PropertyDocument {
   notes?: string;
 }
 
+export interface PriceHistoryEntry {
+  id: string;
+  date: string;
+  previousExpectedPrice: number;
+  newExpectedPrice: number;
+  previousMarketPrice?: number;
+  newMarketPrice?: number;
+  updatedBy: string;
+  note?: string;
+}
+
+export interface SellerAdvance {
+  id: string;
+  code: string;
+  sellerId: string;
+  propertyId: string;
+  amount: number;
+  collectionDate: string;
+  paymentMethod: AdvancePaymentMethod;
+  transactionReference: string;
+  status: AdvanceStatus;
+  refundAmount?: number;
+  refundDate?: string;
+  adjustedDealId?: string;
+  remarks: string;
+  recordedBy: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Seller {
   id: string;
   code: string;
@@ -65,9 +118,13 @@ export interface Seller {
   phone: string;
   whatsapp: string;
   address: string;
+  relationshipWithProperty: SellerRelationship;
   notes: string;
   assignedAgentId: string;
   lastContactAt: string;
+  lastContactedDate?: string;
+  lastContactMethod?: ContactMethod;
+  lastConversationNotes?: string;
   created_at: string;
   updated_at: string;
 }
@@ -77,21 +134,46 @@ export interface Property {
   code: string;
   title: string;
   type: PropertyType;
+  category: PropertyCategory;
+  district: string;
+  panchayath: string;
+  locality: string;
+  fullAddress?: string;
+  googleMapsUrl?: string;
   location: string;
   areaValue: number;
   areaUnit: AreaUnit;
   areaDisplay: string;
+  roadConnectivity: string;
+  distanceToHighway?: string;
+  nearbyLandmarks?: string;
+  waterAvailability?: string;
+  terrain?: string;
+  frontage?: string;
+  electricity?: string;
+  boundaryDetails?: string;
+  otherFeatures?: string;
+  expectedPrice: number;
+  marketPrice?: number;
   askingPrice: number;
+  priceHistory: PriceHistoryEntry[];
   description: string;
   sellerId: string;
+  sellerRelationship?: SellerRelationship;
   status: PropertyStatus;
   runningCategory: RunningCategory;
   isManaged: boolean;
   assignedAgentId: string;
   internalNotes: string;
   nextFollowUpDate: string;
+  listedDate: string;
   addedDate: string;
-  coordinates: { lat: number; lng: number };
+  latitude?: number | null;
+  longitude?: number | null;
+  location_accuracy?: string;
+  location_updated_at?: string;
+  isDemoData?: boolean;
+  coordinates?: { lat: number; lng: number } | null;
   created_at: string;
   updated_at: string;
 }
@@ -107,20 +189,38 @@ export type LeadStatus =
   | 'Lost'
   | 'On Hold';
 
+export type LeadSource =
+  | 'Instagram'
+  | 'Facebook'
+  | 'WhatsApp'
+  | 'Website'
+  | 'Referral'
+  | 'Walk-in'
+  | 'Phone Call'
+  | 'Advertisement'
+  | 'Existing Customer'
+  | 'Other'
+  | string;
+
 export interface Lead {
   id: string;
   code: string;
   name: string;
   phone: string;
   whatsapp: string;
+  leadSource: LeadSource;
   preferredLocation: string;
   minBudget: number;
   maxBudget: number;
   propertyType: PropertyType | 'Any';
+  propertyCategory?: PropertyCategory | 'Any';
   requirementDescription: string;
   status: LeadStatus;
   assignedAgentId: string;
   nextFollowUpDate: string;
+  lastContactedDate?: string;
+  lastContactMethod?: ContactMethod;
+  lastConversationNotes?: string;
   notes: string;
   conversionDetails?: string;
   created_at: string;
@@ -299,6 +399,7 @@ export interface ActivityLog {
     | 'FollowUp'
     | 'SiteVisit'
     | 'Deal'
+    | 'Advance'
     | 'Investment'
     | 'Rental'
     | 'System';
@@ -316,7 +417,9 @@ export interface AgencySettings {
   currencySymbol: string;
   defaultCommissionRate: number;
   propertyCategories: PropertyType[];
+  propertyCategoryGroups: PropertyCategory[];
   leadStatuses: LeadStatus[];
+  leadSources: string[];
   followUpDefaults: {
     defaultTime: string;
     reminderWindowHours: number;
@@ -326,11 +429,13 @@ export interface AgencySettings {
 }
 
 export interface CRMDatabase {
+  schemaVersion?: number;
   users: User[];
   sellers: Seller[];
   properties: Property[];
   propertyImages: PropertyImage[];
   propertyDocuments: PropertyDocument[];
+  sellerAdvances: SellerAdvance[];
   leads: Lead[];
   propertyMatches: PropertyMatch[];
   followUps: FollowUp[];

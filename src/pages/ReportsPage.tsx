@@ -1,16 +1,26 @@
 import React, { useMemo, useState } from 'react';
 import { Download, Printer } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
-import { calculateROI, formatCurrency, formatDate } from '../utils/formatters';
+import {
+  calculateDaysSince,
+  calculateROI,
+  formatCurrency,
+  formatDate,
+  formatDaysAgo,
+} from '../utils/formatters';
 
 type ReportKey =
   | 'property-inventory'
+  | 'listing-aging'
   | 'properties-by-type'
   | 'properties-by-location'
   | 'available-vs-sold'
   | 'seller-report'
+  | 'seller-advances'
   | 'lead-report'
+  | 'leads-by-source'
   | 'lead-conversion'
+  | 'last-contacted'
   | 'follow-up-performance'
   | 'site-visit-report'
   | 'sales-report'
@@ -21,12 +31,16 @@ type ReportKey =
 
 const REPORT_MENU: { key: ReportKey; label: string }[] = [
   { key: 'property-inventory', label: 'Property Inventory' },
+  { key: 'listing-aging', label: 'Listing Aging & Contact Health' },
   { key: 'properties-by-type', label: 'Properties by Type' },
   { key: 'properties-by-location', label: 'Properties by Location' },
   { key: 'available-vs-sold', label: 'Available vs Sold' },
   { key: 'seller-report', label: 'Seller Report' },
+  { key: 'seller-advances', label: 'Seller Advance Collection' },
   { key: 'lead-report', label: 'Lead Report' },
+  { key: 'leads-by-source', label: 'Leads by Source' },
   { key: 'lead-conversion', label: 'Lead Conversion' },
+  { key: 'last-contacted', label: 'Last Contacted Overview' },
   { key: 'follow-up-performance', label: 'Follow-up Performance' },
   { key: 'site-visit-report', label: 'Site Visit Report' },
   { key: 'sales-report', label: 'Sales Report' },
@@ -66,28 +80,124 @@ export const ReportsPage: React.FC = () => {
         return {
           title: 'Property Inventory Report',
           subtitle: `${propsInRange.length} properties registered within date range`,
-          headers: ['Code', 'Title', 'Type', 'Location', 'Area', 'Asking Price', 'Status', 'Added'],
+          headers: [
+            'TAK ID',
+            'Title',
+            'Type',
+            'Category',
+            'District',
+            'Locality',
+            'Expected Price',
+            'Market Price',
+            'Days Listed',
+            'Status',
+            'Listed Date',
+          ],
           rows: propsInRange.map((p) => [
             p.code,
             p.title,
             p.type,
-            p.location,
-            p.areaDisplay,
-            formatCurrency(p.askingPrice, currency),
+            p.category || '—',
+            p.district || '—',
+            p.locality || p.location,
+            formatCurrency(p.expectedPrice ?? p.askingPrice, currency),
+            p.marketPrice ? formatCurrency(p.marketPrice, currency) : '—',
+            `${calculateDaysSince(p.listedDate || p.addedDate)}d`,
             p.status,
-            formatDate(p.addedDate),
+            formatDate(p.listedDate || p.addedDate),
           ]),
         };
+
+      case 'listing-aging': {
+        const activeProps = propsInRange.filter(
+          (p) => p.status !== 'Sold' && p.status !== 'Inactive'
+        );
+        const daysArr = activeProps.map((p) =>
+          calculateDaysSince(p.listedDate || p.addedDate)
+        );
+        const avgDays =
+          daysArr.length > 0
+            ? Math.round(daysArr.reduce((a, b) => a + b, 0) / daysArr.length)
+            : 0;
+        const gt30 = daysArr.filter((d) => d > 30).length;
+        const gt60 = daysArr.filter((d) => d > 60).length;
+        const gt90 = daysArr.filter((d) => d > 90).length;
+        const noRecent = activeProps.filter((p) => {
+          const seller = db.sellers.find((s) => s.id === p.sellerId);
+          const last = seller?.lastContactedDate || seller?.lastContactAt;
+          return !last || calculateDaysSince(last) > 14;
+        }).length;
+
+        const sorted = [...activeProps].sort(
+          (a, b) =>
+            calculateDaysSince(b.listedDate || b.addedDate) -
+            calculateDaysSince(a.listedDate || a.addedDate)
+        );
+
+        return {
+          title: 'Listing Aging & Contact Health Report',
+          subtitle: `Average ${avgDays} days listed across ${activeProps.length} active properties · ${noRecent} without contact in 14+ days`,
+          headers: [
+            'TAK ID',
+            'Property',
+            'District',
+            'Listed Date',
+            'Days Listed',
+            'Aging Bracket',
+            'Seller',
+            'Seller Last Contacted',
+            'Status',
+          ],
+          rows: sorted.map((p) => {
+            const days = calculateDaysSince(p.listedDate || p.addedDate);
+            const bracket =
+              days > 90
+                ? '> 90 Days'
+                : days > 60
+                ? '> 60 Days'
+                : days > 30
+                ? '> 30 Days'
+                : '0–30 Days';
+            const seller = db.sellers.find((s) => s.id === p.sellerId);
+            const last = seller?.lastContactedDate || seller?.lastContactAt;
+            return [
+              p.code,
+              p.title,
+              p.district || p.location,
+              formatDate(p.listedDate || p.addedDate),
+              `${days} days`,
+              bracket,
+              seller?.name || '—',
+              formatDaysAgo(last),
+              p.status,
+            ];
+          }),
+          chartBars: [
+            { label: 'Average Days Listed', value: avgDays, display: `${avgDays} days` },
+            { label: 'Listed > 30 Days', value: gt30, display: `${gt30} properties` },
+            { label: 'Listed > 60 Days', value: gt60, display: `${gt60} properties` },
+            { label: 'Listed > 90 Days', value: gt90, display: `${gt90} properties` },
+            {
+              label: 'Without Recent Seller Contact (>14d)',
+              value: noRecent,
+              display: `${noRecent} properties`,
+            },
+          ],
+        };
+      }
 
       case 'properties-by-type': {
         const groups = db.settings.propertyCategories.map((cat) => {
           const items = propsInRange.filter((p) => p.type === cat);
-          const totalVal = items.reduce((s, p) => s + p.askingPrice, 0);
+          const totalVal = items.reduce(
+            (s, p) => s + (p.expectedPrice ?? p.askingPrice),
+            0
+          );
           return { cat, count: items.length, totalVal };
         });
         return {
           title: 'Properties by Type',
-          subtitle: 'Portfolio count and total valuation grouped by property category',
+          subtitle: 'Portfolio count and total valuation grouped by property type',
           headers: ['Property Type', 'Count', 'Available', 'Total Portfolio Value'],
           rows: groups.map((g) => [
             g.cat,
@@ -106,15 +216,18 @@ export const ReportsPage: React.FC = () => {
       case 'properties-by-location': {
         const map = new Map<string, { count: number; value: number }>();
         propsInRange.forEach((p) => {
-          const loc = p.location.split(',')[0].trim();
+          const loc = p.district || p.location.split(',')[0].trim();
           const cur = map.get(loc) || { count: 0, value: 0 };
-          map.set(loc, { count: cur.count + 1, value: cur.value + p.askingPrice });
+          map.set(loc, {
+            count: cur.count + 1,
+            value: cur.value + (p.expectedPrice ?? p.askingPrice),
+          });
         });
         const entries = Array.from(map.entries());
         return {
           title: 'Properties by Location',
-          subtitle: 'Geographic distribution across active towns & micro-markets',
-          headers: ['Location', 'Properties', 'Total Value'],
+          subtitle: 'Geographic distribution across active districts & micro-markets',
+          headers: ['District / Area', 'Properties', 'Total Value'],
           rows: entries.map(([loc, d]) => [
             loc,
             d.count,
@@ -135,7 +248,7 @@ export const ReportsPage: React.FC = () => {
           count: propsInRange.filter((p) => p.status === s).length,
           val: propsInRange
             .filter((p) => p.status === s)
-            .reduce((acc, p) => acc + p.askingPrice, 0),
+            .reduce((acc, p) => acc + (p.expectedPrice ?? p.askingPrice), 0),
         }));
         return {
           title: 'Available vs Sold Breakdown',
@@ -159,36 +272,149 @@ export const ReportsPage: React.FC = () => {
         return {
           title: 'Seller Portfolio Report',
           subtitle: `${db.sellers.length} registered sellers and linked inventory counts`,
-          headers: ['Code', 'Seller Name', 'Phone', 'Total Properties', 'Active', 'Sold', 'Agent'],
+          headers: ['Code', 'Seller Name', 'Relationship', 'Phone', 'Total Properties', 'Active', 'Last Contacted', 'Agent'],
           rows: db.sellers.map((s) => {
             const props = db.properties.filter((p) => p.sellerId === s.id);
             return [
               s.code,
               s.name,
+              s.relationshipWithProperty || 'Owner',
               s.phone,
               props.length,
               props.filter((p) => p.status === 'Available').length,
-              props.filter((p) => p.status === 'Sold').length,
+              formatDaysAgo(s.lastContactedDate || s.lastContactAt),
               db.users.find((u) => u.id === s.assignedAgentId)?.name || '—',
             ];
           }),
         };
 
+      case 'seller-advances': {
+        const advances = (db.sellerAdvances || []).filter((a) => inRange(a.collectionDate));
+        const held = advances
+          .filter((a) => a.status === 'Collected')
+          .reduce((s, a) => s + a.amount, 0);
+        const adjusted = advances
+          .filter((a) => a.status === 'Adjusted')
+          .reduce((s, a) => s + a.amount, 0);
+        const refunded = advances
+          .filter((a) => a.status === 'Refunded' || a.status === 'Partially Refunded')
+          .reduce((s, a) => s + (a.refundAmount ?? a.amount), 0);
+
+        return {
+          title: 'Seller Advance Collection Report',
+          subtitle:
+            'Financial tracking ledger of advances collected, adjusted, or refunded (excluded from sales revenue)',
+          headers: [
+            'Advance ID',
+            'Property',
+            'Seller',
+            'Collection Date',
+            'Amount',
+            'Method',
+            'Txn Ref',
+            'Status',
+            'Remarks',
+          ],
+          rows: advances.map((a) => {
+            const prop = db.properties.find((p) => p.id === a.propertyId);
+            const seller = db.sellers.find((s) => s.id === a.sellerId);
+            return [
+              a.code,
+              prop ? `${prop.code} (${prop.title})` : '—',
+              seller?.name || '—',
+              formatDate(a.collectionDate),
+              formatCurrency(a.amount, currency),
+              a.paymentMethod,
+              a.transactionReference || '—',
+              a.status,
+              a.remarks || '—',
+            ];
+          }),
+          chartBars: [
+            {
+              label: 'Held (Collected)',
+              value: held,
+              display: formatCurrency(held, currency),
+            },
+            {
+              label: 'Adjusted to Deal',
+              value: adjusted,
+              display: formatCurrency(adjusted, currency),
+            },
+            {
+              label: 'Refunded',
+              value: refunded,
+              display: formatCurrency(refunded, currency),
+            },
+          ],
+        };
+      }
+
       case 'lead-report':
         return {
           title: 'Buyer Lead Report',
           subtitle: `${leadsInRange.length} buyer leads registered within range`,
-          headers: ['Lead ID', 'Customer', 'Location', 'Type', 'Max Budget', 'Status', 'Agent'],
+          headers: [
+            'Lead ID',
+            'Customer',
+            'Source',
+            'Location',
+            'Type',
+            'Category',
+            'Max Budget',
+            'Last Contacted',
+            'Status',
+            'Agent',
+          ],
           rows: leadsInRange.map((l) => [
             l.code,
             l.name,
+            l.leadSource || 'Other',
             l.preferredLocation || 'Any',
             l.propertyType,
+            l.propertyCategory || 'Any',
             formatCurrency(l.maxBudget, currency),
+            formatDaysAgo(l.lastContactedDate),
             l.status,
             db.users.find((u) => u.id === l.assignedAgentId)?.name || '—',
           ]),
         };
+
+      case 'leads-by-source': {
+        const allSources = Array.from(
+          new Set([
+            ...(db.settings.leadSources || []),
+            ...leadsInRange.map((l) => l.leadSource || 'Other'),
+          ])
+        );
+        const groups = allSources.map((src) => {
+          const items = leadsInRange.filter((l) => (l.leadSource || 'Other') === src);
+          const converted = items.filter((l) => l.status === 'Converted').length;
+          const active = items.filter(
+            (l) => !['Converted', 'Lost'].includes(l.status)
+          ).length;
+          return { src, total: items.length, converted, active };
+        });
+        return {
+          title: 'Leads by Source Report',
+          subtitle: 'Channel performance and buyer conversion across lead sources',
+          headers: ['Lead Source', 'Total Leads', 'Share %', 'Active Pipeline', 'Converted'],
+          rows: groups.map((g) => [
+            g.src,
+            g.total,
+            `${leadsInRange.length > 0 ? Math.round((g.total / leadsInRange.length) * 100) : 0}%`,
+            g.active,
+            g.converted,
+          ]),
+          chartBars: groups
+            .filter((g) => g.total > 0)
+            .map((g) => ({
+              label: g.src,
+              value: g.total,
+              display: `${g.total} leads (${g.converted} converted)`,
+            })),
+        };
+      }
 
       case 'lead-conversion': {
         const stages = db.settings.leadStatuses.map((st) => ({
@@ -209,6 +435,54 @@ export const ReportsPage: React.FC = () => {
             value: s.count,
             display: `${s.count} leads`,
           })),
+        };
+      }
+
+      case 'last-contacted': {
+        const records = [
+          ...db.sellers.map((s) => ({
+            entity: 'Seller',
+            code: s.code,
+            name: s.name,
+            lastDate: s.lastContactedDate || s.lastContactAt || '',
+            method: s.lastContactMethod || 'Call',
+            notes: s.lastConversationNotes || '—',
+            agent: db.users.find((u) => u.id === s.assignedAgentId)?.name || '—',
+          })),
+          ...db.leads.map((l) => ({
+            entity: 'Lead',
+            code: l.code,
+            name: l.name,
+            lastDate: l.lastContactedDate || '',
+            method: l.lastContactMethod || '—',
+            notes: l.lastConversationNotes || '—',
+            agent: db.users.find((u) => u.id === l.assignedAgentId)?.name || '—',
+          })),
+        ].sort((a, b) => (b.lastDate || '').localeCompare(a.lastDate || ''));
+
+        return {
+          title: 'Last Contacted Overview',
+          subtitle: 'Outreach recency, communication channel, and latest notes across Sellers & Leads',
+          headers: [
+            'Entity',
+            'Code',
+            'Contact Name',
+            'Last Contacted Date',
+            'Recency',
+            'Method',
+            'Latest Conversation Notes',
+            'Assigned Agent',
+          ],
+          rows: records.map((r) => [
+            r.entity,
+            r.code,
+            r.name,
+            r.lastDate ? formatDate(r.lastDate) : 'Never',
+            formatDaysAgo(r.lastDate || undefined),
+            r.method,
+            r.notes.length > 60 ? `${r.notes.slice(0, 60)}…` : r.notes,
+            r.agent,
+          ]),
         };
       }
 
@@ -498,7 +772,7 @@ export const ReportsPage: React.FC = () => {
         {/* Left Report Picker */}
         <div className="no-print lg:col-span-3 bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl p-3 space-y-1">
           <p className="px-2.5 py-1.5 text-[11px] font-semibold text-[#77796F]">
-            Available Reports (14)
+            Available Reports ({REPORT_MENU.length})
           </p>
           {REPORT_MENU.map((item) => (
             <button

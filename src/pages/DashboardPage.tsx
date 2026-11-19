@@ -10,9 +10,12 @@ import {
 import { useCRM } from '../context/CRMContext';
 import { crmService } from '../services/crmService';
 import {
+  calculateDaysSince,
   formatCurrency,
   formatDate,
   formatDateTime,
+  formatDaysAgo,
+  formatDaysListed,
   getTodayISO,
 } from '../utils/formatters';
 import { PropertyThumbnail, StatusTag } from '../components/common/UIPrimitives';
@@ -92,7 +95,7 @@ export const DashboardPage: React.FC = () => {
       count: visibleProperties.filter((p) => p.status === status).length,
       value: visibleProperties
         .filter((p) => p.status === status)
-        .reduce((acc, p) => acc + p.askingPrice, 0),
+        .reduce((acc, p) => acc + (p.expectedPrice ?? p.askingPrice), 0),
     }));
   }, [visibleProperties]);
 
@@ -157,6 +160,110 @@ export const DashboardPage: React.FC = () => {
       };
     });
   }, [visibleDeals]);
+
+  // Listing Duration, Contact Health, Seller Advances, Leads by Source & Last Contacted
+  const portfolioInsights = useMemo(() => {
+    const activeProps = visibleProperties.filter(
+      (p) => p.status !== 'Sold' && p.status !== 'Inactive'
+    );
+    const daysList = activeProps.map((p) =>
+      calculateDaysSince(p.listedDate || p.addedDate)
+    );
+    const avgDaysListed =
+      daysList.length > 0
+        ? Math.round(daysList.reduce((a, b) => a + b, 0) / daysList.length)
+        : 0;
+    const gt30Count = daysList.filter((d) => d > 30).length;
+    const gt60Count = daysList.filter((d) => d > 60).length;
+    const gt90Count = daysList.filter((d) => d > 90).length;
+
+    const noRecentContactProps = activeProps
+      .map((p) => {
+        const seller = db.sellers.find((s) => s.id === p.sellerId);
+        const lastDate = seller?.lastContactedDate || seller?.lastContactAt;
+        const staleDays = lastDate ? calculateDaysSince(lastDate) : 999;
+        return { prop: p, seller, lastDate, staleDays };
+      })
+      .filter((item) => item.staleDays > 14)
+      .sort((a, b) => b.staleDays - a.staleDays);
+
+    const visiblePropertyIds = new Set(visibleProperties.map((p) => p.id));
+    const visibleAdvances = (db.sellerAdvances || []).filter(
+      (a) =>
+        visiblePropertyIds.has(a.propertyId) ||
+        visibleSellers.some((s) => s.id === a.sellerId)
+    );
+    const totalAdvanceCollected = visibleAdvances.reduce((s, a) => s + a.amount, 0);
+    const heldAdvanceAmount = visibleAdvances
+      .filter((a) => a.status === 'Collected')
+      .reduce((s, a) => s + a.amount, 0);
+    const adjustedAdvanceAmount = visibleAdvances
+      .filter((a) => a.status === 'Adjusted')
+      .reduce((s, a) => s + a.amount, 0);
+    const refundedAdvanceAmount = visibleAdvances
+      .filter((a) => a.status === 'Refunded' || a.status === 'Partially Refunded')
+      .reduce((s, a) => s + (a.refundAmount ?? a.amount), 0);
+
+    const sourceNames = Array.from(
+      new Set([
+        ...(db.settings.leadSources || []),
+        ...visibleLeads.map((l) => l.leadSource || 'Other'),
+      ])
+    );
+    const leadsBySource = sourceNames
+      .map((source) => ({
+        source,
+        count: visibleLeads.filter((l) => (l.leadSource || 'Other') === source).length,
+      }))
+      .filter((item) => item.count > 0)
+      .sort((a, b) => b.count - a.count);
+
+    const recentContacts = [
+      ...visibleSellers.map((s) => ({
+        entityType: 'Seller' as const,
+        id: s.id,
+        name: s.name,
+        code: s.code,
+        date: s.lastContactedDate || s.lastContactAt,
+        method: s.lastContactMethod || 'Call',
+        notes: s.lastConversationNotes || '',
+      })),
+      ...visibleLeads.map((l) => ({
+        entityType: 'Lead' as const,
+        id: l.id,
+        name: l.name,
+        code: l.code,
+        date: l.lastContactedDate,
+        method: l.lastContactMethod,
+        notes: l.lastConversationNotes || '',
+      })),
+    ]
+      .filter((c) => Boolean(c.date))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      .slice(0, 6);
+
+    return {
+      avgDaysListed,
+      gt30Count,
+      gt60Count,
+      gt90Count,
+      noRecentContactProps,
+      visibleAdvances,
+      totalAdvanceCollected,
+      heldAdvanceAmount,
+      adjustedAdvanceAmount,
+      refundedAdvanceAmount,
+      leadsBySource,
+      recentContacts,
+    };
+  }, [
+    visibleProperties,
+    visibleSellers,
+    visibleLeads,
+    db.sellers,
+    db.sellerAdvances,
+    db.settings.leadSources,
+  ]);
 
   const kpiCards = [
     {
@@ -600,19 +707,343 @@ export const DashboardPage: React.FC = () => {
                       {prop.title}
                     </p>
                     <p className="text-[11px] text-[#77796F] truncate">
-                      {prop.location} · {prop.runningCategory}
+                      {prop.code} · {prop.locality || prop.location} · {formatDaysListed(prop.listedDate || prop.addedDate)}
                     </p>
                   </div>
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-xs font-mono tabular-nums font-semibold text-[#064E3B]">
-                    {formatCurrency(prop.askingPrice, currency)}
+                    {formatCurrency(prop.expectedPrice ?? prop.askingPrice, currency)}
                   </p>
                   <StatusTag status={prop.status} className="mt-1" />
                 </div>
               </button>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* Portfolio Aging, Advances, Lead Sources & Last Contacted Overview */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Listing Duration & Recent Contact Health */}
+        <div className="lg:col-span-6 bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-[#20251F]">
+                Listing Duration & Contact Health
+              </h2>
+              <p className="text-[11px] text-[#77796F]">
+                Active inventory aging brackets and seller outreach recency
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate({ page: 'properties' })}
+              className="text-xs font-medium text-[#064E3B] hover:underline cursor-pointer"
+            >
+              Inventory
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="p-3 rounded-xl bg-[#F1F0E8]/70 border border-[#E5E4DA]">
+              <p className="text-[11px] text-[#77796F]">Avg. Days Listed</p>
+              <p className="text-xl font-semibold tabular-nums text-[#064E3B] mt-0.5">
+                {portfolioInsights.avgDaysListed}d
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate({ page: 'properties', filterAging: 'gt30' })}
+              className="p-3 rounded-xl bg-[#F1F0E8]/50 hover:bg-[#E4EBE0]/50 border border-[#E5E4DA] text-left cursor-pointer transition-colors"
+            >
+              <p className="text-[11px] text-[#77796F]">Listed &gt; 30 Days</p>
+              <p className="text-xl font-semibold tabular-nums text-[#20251F] mt-0.5">
+                {portfolioInsights.gt30Count}
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate({ page: 'properties', filterAging: 'gt60' })}
+              className="p-3 rounded-xl bg-[#F1F0E8]/50 hover:bg-[#E4EBE0]/50 border border-[#E5E4DA] text-left cursor-pointer transition-colors"
+            >
+              <p className="text-[11px] text-[#77796F]">Listed &gt; 60 Days</p>
+              <p className="text-xl font-semibold tabular-nums text-[#7A5612] mt-0.5">
+                {portfolioInsights.gt60Count}
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate({ page: 'properties', filterAging: 'gt90' })}
+              className="p-3 rounded-xl bg-[#F1F0E8]/50 hover:bg-[#E4EBE0]/50 border border-[#E5E4DA] text-left cursor-pointer transition-colors"
+            >
+              <p className="text-[11px] text-[#77796F]">Listed &gt; 90 Days</p>
+              <p className="text-xl font-semibold tabular-nums text-[#C96C60] mt-0.5">
+                {portfolioInsights.gt90Count}
+              </p>
+            </button>
+          </div>
+
+          <div className="pt-2 border-t border-[#E5E4DA]">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-[#20251F]">
+                Properties Without Recent Contact (&gt;14d)
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate({ page: 'properties', filterAging: 'no-recent-contact' })
+                }
+                className="text-[11px] font-medium text-[#C96C60] hover:underline cursor-pointer"
+              >
+                {portfolioInsights.noRecentContactProps.length} require outreach
+              </button>
+            </div>
+            {portfolioInsights.noRecentContactProps.length === 0 ? (
+              <p className="text-xs text-[#77796F] py-2">
+                All active sellers contacted within the last 14 days.
+              </p>
+            ) : (
+              <div className="divide-y divide-[#E5E4DA]">
+                {portfolioInsights.noRecentContactProps.slice(0, 3).map(({ prop, seller, lastDate }) => (
+                  <button
+                    key={prop.id}
+                    type="button"
+                    onClick={() => navigate({ page: 'property-detail', id: prop.id })}
+                    className="w-full py-2 flex items-center justify-between text-left hover:bg-[#F1F0E8]/50 px-2 -mx-2 rounded-lg text-xs cursor-pointer"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-[#20251F] truncate">
+                        <span className="font-mono text-[#064E3B] mr-1.5">{prop.code}</span>
+                        {prop.title}
+                      </p>
+                      <p className="text-[11px] text-[#77796F]">
+                        Seller: {seller?.name || 'Owner'} · {formatDaysListed(prop.listedDate || prop.addedDate)}
+                      </p>
+                    </div>
+                    <span className="text-[11px] font-medium text-[#C96C60] whitespace-nowrap ml-2">
+                      {formatDaysAgo(lastDate)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Seller Advance Collection Summary */}
+        <div className="lg:col-span-6 bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl p-5 flex flex-col justify-between space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-[#20251F]">
+                Seller Advance Collection Summary
+              </h2>
+              <p className="text-[11px] text-[#77796F]">
+                Advance & escrow tracking records — excluded from sales revenue
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate({ page: 'reports' })}
+              className="text-xs font-medium text-[#064E3B] hover:underline cursor-pointer"
+            >
+              Advance ledger
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <div className="p-3 rounded-xl bg-[#151D18] text-[#FFFFFF]">
+              <p className="text-[11px] text-[#A8B9A2]">Total Recorded</p>
+              <p className="text-lg font-semibold tabular-nums mt-0.5">
+                {formatCurrency(portfolioInsights.totalAdvanceCollected, currency)}
+              </p>
+              <p className="text-[10px] text-[#A8B9A2] mt-0.5">
+                {portfolioInsights.visibleAdvances.length} txn(s)
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-[#E4EBE0]/50 border border-[#A8B9A2]/50">
+              <p className="text-[11px] text-[#77796F]">Held (Collected)</p>
+              <p className="text-lg font-semibold tabular-nums text-[#064E3B] mt-0.5">
+                {formatCurrency(portfolioInsights.heldAdvanceAmount, currency)}
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-[#F1F0E8]/70 border border-[#E5E4DA]">
+              <p className="text-[11px] text-[#77796F]">Adjusted</p>
+              <p className="text-lg font-semibold tabular-nums text-[#20251F] mt-0.5">
+                {formatCurrency(portfolioInsights.adjustedAdvanceAmount, currency)}
+              </p>
+            </div>
+            <div className="p-3 rounded-xl bg-[#C96C60]/10 border border-[#C96C60]/30">
+              <p className="text-[11px] text-[#77796F]">Refunded</p>
+              <p className="text-lg font-semibold tabular-nums text-[#8D382E] mt-0.5">
+                {formatCurrency(portfolioInsights.refundedAdvanceAmount, currency)}
+              </p>
+            </div>
+          </div>
+
+          <div className="pt-2 border-t border-[#E5E4DA] divide-y divide-[#E5E4DA]">
+            {portfolioInsights.visibleAdvances.length === 0 ? (
+              <p className="text-xs text-[#77796F] py-2">No seller advance transactions recorded yet.</p>
+            ) : (
+              portfolioInsights.visibleAdvances.slice(0, 3).map((adv) => {
+                const prop = db.properties.find((p) => p.id === adv.propertyId);
+                const seller = db.sellers.find((s) => s.id === adv.sellerId);
+                return (
+                  <button
+                    key={adv.id}
+                    type="button"
+                    onClick={() => prop && navigate({ page: 'property-detail', id: prop.id })}
+                    className="w-full py-2 flex items-center justify-between text-left hover:bg-[#F1F0E8]/50 px-2 -mx-2 rounded-lg text-xs cursor-pointer"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium text-[#20251F] truncate">
+                        <span className="font-mono text-[#064E3B] mr-1.5">{adv.code}</span>
+                        {prop?.code || 'Property'} · {seller?.name || 'Seller'}
+                      </p>
+                      <p className="text-[11px] text-[#77796F]">
+                        {formatDate(adv.collectionDate)} · {adv.paymentMethod}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 ml-2">
+                      <span className="font-mono font-semibold text-[#20251F] tabular-nums">
+                        {formatCurrency(adv.amount, currency)}
+                      </span>
+                      <StatusTag status={adv.status} />
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Leads by Source & Last Contacted Overview */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Leads by Source */}
+        <div className="lg:col-span-5 bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl p-5 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h2 className="text-sm font-semibold text-[#20251F]">Leads by Source</h2>
+                <p className="text-[11px] text-[#77796F]">
+                  Acquisition channel breakdown across {stats.totalLeads} leads
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => navigate({ page: 'leads' })}
+                className="text-xs font-medium text-[#064E3B] hover:underline cursor-pointer"
+              >
+                Filter leads
+              </button>
+            </div>
+            {portfolioInsights.leadsBySource.length === 0 ? (
+              <p className="text-xs text-[#77796F] py-6 text-center">No leads recorded yet.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {portfolioInsights.leadsBySource.map((item) => {
+                  const pct =
+                    stats.totalLeads > 0
+                      ? Math.round((item.count / stats.totalLeads) * 100)
+                      : 0;
+                  return (
+                    <button
+                      key={item.source}
+                      type="button"
+                      onClick={() =>
+                        navigate({ page: 'leads', filterSource: item.source })
+                      }
+                      className="w-full text-left group cursor-pointer"
+                    >
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="font-medium text-[#20251F] group-hover:text-[#064E3B]">
+                          {item.source}
+                        </span>
+                        <span className="font-mono tabular-nums text-[11px] text-[#77796F]">
+                          {item.count} ({pct}%)
+                        </span>
+                      </div>
+                      <div className="h-2 bg-[#F1F0E8] rounded-full overflow-hidden">
+                        <div
+                          style={{ width: `${Math.max(6, pct)}%` }}
+                          className="h-full bg-[#064E3B] group-hover:bg-[#176B50] rounded-full transition-colors"
+                        />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <p className="text-[11px] text-[#77796F] pt-3 border-t border-[#E5E4DA] mt-3">
+            Click any source bar to inspect leads from that channel.
+          </p>
+        </div>
+
+        {/* Last Contacted Overview */}
+        <div className="lg:col-span-7 bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h2 className="text-sm font-semibold text-[#20251F]">
+                Last Contacted Overview
+              </h2>
+              <p className="text-[11px] text-[#77796F]">
+                Latest recorded Seller & Lead interactions across the team
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => navigate({ page: 'follow-ups' })}
+              className="text-xs font-medium text-[#064E3B] hover:underline cursor-pointer"
+            >
+              Follow-ups
+            </button>
+          </div>
+          {portfolioInsights.recentContacts.length === 0 ? (
+            <p className="text-xs text-[#77796F] py-6 text-center">
+              No contact activity logged yet.
+            </p>
+          ) : (
+            <div className="divide-y divide-[#E5E4DA]">
+              {portfolioInsights.recentContacts.map((item) => (
+                <button
+                  key={`${item.entityType}-${item.id}`}
+                  type="button"
+                  onClick={() =>
+                    navigate({
+                      page: item.entityType === 'Seller' ? 'seller-detail' : 'lead-detail',
+                      id: item.id,
+                    })
+                  }
+                  className="w-full py-2.5 flex items-start justify-between gap-3 text-left hover:bg-[#F1F0E8]/50 px-2 -mx-2 rounded-lg transition-colors cursor-pointer"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="font-semibold text-[#20251F]">{item.name}</span>
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#E4EBE0] text-[#064E3B]">
+                        {item.entityType}
+                      </span>
+                      <span className="text-[11px] text-[#77796F]">
+                        via {item.method || 'Call'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-[#77796F] truncate max-w-md mt-0.5">
+                      {item.notes || 'Contact activity logged'}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-[11px] font-medium text-[#064E3B]">
+                      {formatDaysAgo(item.date)}
+                    </p>
+                    <p className="text-[10px] font-mono text-[#77796F]">
+                      {formatDate(item.date)}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

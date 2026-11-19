@@ -7,6 +7,8 @@ export interface RouteState {
   id?: string;
   filterStatus?: string;
   filterCategory?: string;
+  filterAging?: string;
+  filterSource?: string;
   preselectedSellerId?: string;
 }
 

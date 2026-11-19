@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { Eye, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
-import { crmService } from '../services/crmService';
-import { Seller } from '../types/crm';
-import { formatDateTime } from '../utils/formatters';
+import { crmService, SELLER_RELATIONSHIPS } from '../services/crmService';
+import { Seller, SellerRelationship } from '../types/crm';
+import { formatDate, formatDaysAgo } from '../utils/formatters';
 import {
   ConfirmDialog,
   EmptyState,
@@ -27,6 +27,8 @@ export const SellersPage: React.FC = () => {
   const [phone, setPhone] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
   const [address, setAddress] = useState('');
+  const [relationshipWithProperty, setRelationshipWithProperty] =
+    useState<SellerRelationship>('Owner');
   const [notes, setNotes] = useState('');
   const [assignedAgentId, setAssignedAgentId] = useState(currentUser.id);
 
@@ -36,6 +38,7 @@ export const SellersPage: React.FC = () => {
     setPhone('');
     setWhatsapp('');
     setAddress('');
+    setRelationshipWithProperty('Owner');
     setNotes('');
     setAssignedAgentId(currentUser.id);
     setSellerModalOpen(true);
@@ -47,6 +50,7 @@ export const SellersPage: React.FC = () => {
     setPhone(seller.phone);
     setWhatsapp(seller.whatsapp);
     setAddress(seller.address);
+    setRelationshipWithProperty(seller.relationshipWithProperty || 'Owner');
     setNotes(seller.notes);
     setAssignedAgentId(seller.assignedAgentId);
     setSellerModalOpen(true);
@@ -60,7 +64,8 @@ export const SellersPage: React.FC = () => {
           s.name.toLowerCase().includes(q) ||
           s.code.toLowerCase().includes(q) ||
           s.phone.includes(q) ||
-          s.address.toLowerCase().includes(q);
+          s.address.toLowerCase().includes(q) ||
+          (s.relationshipWithProperty || '').toLowerCase().includes(q);
         if (!hit) return false;
       }
       if (agentFilter !== 'All' && s.assignedAgentId !== agentFilter) return false;
@@ -87,10 +92,13 @@ export const SellersPage: React.FC = () => {
           phone,
           whatsapp: whatsapp || phone,
           address,
+          relationshipWithProperty,
           notes,
           assignedAgentId,
         }),
-      editingSeller ? 'Seller record updated' : 'New seller registered'
+      editingSeller
+        ? 'Seller record updated (last-contacted log preserved)'
+        : 'New seller registered'
     );
     if (ok) setSellerModalOpen(false);
   };
@@ -100,10 +108,10 @@ export const SellersPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[#20251F]">
-            Sellers & Property Owners
+            Sellers &amp; Property Owners
           </h1>
           <p className="text-xs text-[#77796F] mt-1">
-            One seller can own multiple properties. Add additional listings directly from a seller profile.
+            Track owner relationship, last-contacted activity, advances, and linked property listings.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -137,7 +145,7 @@ export const SellersPage: React.FC = () => {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Search seller name, ID, phone, or address..."
+            placeholder="Search seller name, ID, phone, relationship, or address..."
             className="w-full h-9 pl-9 pr-3 text-xs bg-[#F1F0E8]/60 border border-[#E5E4DA] rounded-lg focus:outline-none focus:bg-[#FFFFFF] focus:border-[#064E3B]"
           />
         </div>
@@ -172,11 +180,11 @@ export const SellersPage: React.FC = () => {
               <thead>
                 <tr className="border-b border-[#E5E4DA] bg-[#F1F0E8]/50 text-[11px] font-semibold text-[#77796F]">
                   <th className="py-3 px-4">Seller ID</th>
-                  <th className="py-3 px-3">Name</th>
+                  <th className="py-3 px-3">Name &amp; Relationship</th>
                   <th className="py-3 px-3">Phone</th>
                   <th className="py-3 px-3 text-right">Properties</th>
                   <th className="py-3 px-3 text-right">Active</th>
-                  <th className="py-3 px-3">Last Contact</th>
+                  <th className="py-3 px-3">Last Contacted</th>
                   <th className="py-3 px-3">Assigned Agent</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
@@ -187,22 +195,28 @@ export const SellersPage: React.FC = () => {
                   const activeCount = owned.filter(
                     (p) => !['Sold', 'Inactive'].includes(p.status)
                   ).length;
+                  const lastDate = seller.lastContactedDate || seller.lastContactAt;
                   return (
                     <tr key={seller.id} className="hover:bg-[#F1F0E8]/40 transition-colors">
                       <td className="py-3 px-4 font-mono tabular-nums text-[11px] text-[#77796F]">
                         {seller.code}
                       </td>
                       <td className="py-3 px-3">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate({ page: 'seller-detail', id: seller.id })
-                          }
-                          className="font-semibold text-[#064E3B] hover:underline text-left cursor-pointer"
-                        >
-                          {seller.name}
-                        </button>
-                        <p className="text-[11px] text-[#77796F] truncate max-w-[220px]">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              navigate({ page: 'seller-detail', id: seller.id })
+                            }
+                            className="font-semibold text-[#064E3B] hover:underline text-left cursor-pointer"
+                          >
+                            {seller.name}
+                          </button>
+                          <span className="px-1.5 py-0.5 rounded bg-[#E4EBE0]/70 text-[#064E3B] text-[10px] font-medium">
+                            {seller.relationshipWithProperty || 'Owner'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[#77796F] truncate max-w-[240px]">
                           {seller.address}
                         </p>
                       </td>
@@ -215,8 +229,17 @@ export const SellersPage: React.FC = () => {
                       <td className="py-3 px-3 text-right font-mono tabular-nums text-[#064E3B] font-semibold">
                         {activeCount}
                       </td>
-                      <td className="py-3 px-3 font-mono tabular-nums text-[11px] text-[#77796F] whitespace-nowrap">
-                        {formatDateTime(seller.lastContactAt)}
+                      <td className="py-3 px-3 max-w-[220px]">
+                        <p className="text-[11px] font-medium text-[#20251F] whitespace-nowrap">
+                          {formatDaysAgo(lastDate)}
+                          {seller.lastContactMethod ? ` · ${seller.lastContactMethod}` : ''}
+                        </p>
+                        <p className="text-[10px] font-mono text-[#77796F] truncate">
+                          {formatDate(lastDate)}
+                          {seller.lastConversationNotes
+                            ? ` — ${seller.lastConversationNotes}`
+                            : ''}
+                        </p>
                       </td>
                       <td className="py-3 px-3 whitespace-nowrap">
                         {getAgentName(seller.assignedAgentId)}
@@ -271,6 +294,11 @@ export const SellersPage: React.FC = () => {
         open={sellerModalOpen}
         onClose={() => setSellerModalOpen(false)}
         title={editingSeller ? `Edit Seller — ${editingSeller.name}` : 'Register New Seller'}
+        subtitle={
+          editingSeller
+            ? 'Last-contacted logs remain protected during profile edits.'
+            : undefined
+        }
       >
         <form onSubmit={handleSave} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -304,6 +332,24 @@ export const SellersPage: React.FC = () => {
               />
             </div>
             <div>
+              <label className="block text-xs font-medium mb-1">
+                Relationship with Property *
+              </label>
+              <select
+                value={relationshipWithProperty}
+                onChange={(e) =>
+                  setRelationshipWithProperty(e.target.value as SellerRelationship)
+                }
+                className="w-full h-9 px-2.5 text-xs border border-[#E5E4DA] rounded-lg"
+              >
+                {SELLER_RELATIONSHIPS.map((rel) => (
+                  <option key={rel} value={rel}>
+                    {rel}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className="block text-xs font-medium mb-1">Assigned Agent</label>
               <select
                 value={assignedAgentId}
@@ -317,7 +363,7 @@ export const SellersPage: React.FC = () => {
                 ))}
               </select>
             </div>
-            <div className="sm:col-span-2">
+            <div>
               <label className="block text-xs font-medium mb-1">Address</label>
               <input
                 type="text"

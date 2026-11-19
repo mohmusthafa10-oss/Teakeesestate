@@ -3,15 +3,21 @@ import {
   CalendarPlus,
   CheckCircle2,
   Handshake,
+  MessageSquarePlus,
   Phone,
   Share2,
   Sparkles,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
-import { crmService } from '../services/crmService';
-import { LeadStatus } from '../types/crm';
+import { CONTACT_METHODS, crmService } from '../services/crmService';
+import { ContactMethod, LeadStatus } from '../types/crm';
 import { findMatchingPropertiesForLead } from '../utils/matching';
-import { formatCurrency, formatDate, getTodayISO } from '../utils/formatters';
+import {
+  formatCurrency,
+  formatDate,
+  formatDaysAgo,
+  getTodayISO,
+} from '../utils/formatters';
 import {
   Breadcrumbs,
   EmptyState,
@@ -49,6 +55,10 @@ export const LeadProfilePage: React.FC = () => {
   const [fupDate, setFupDate] = useState(getTodayISO());
   const [fupType, setFupType] = useState<'Call' | 'WhatsApp' | 'Meeting'>('Call');
   const [fupNotes, setFupNotes] = useState('');
+
+  const [contactModalOpen, setContactModalOpen] = useState(false);
+  const [contactMethod, setContactMethod] = useState<ContactMethod>('Call');
+  const [contactNotes, setContactNotes] = useState('');
 
   const matches = useMemo(
     () => (lead ? db.propertyMatches.filter((m) => m.leadId === lead.id) : []),
@@ -131,6 +141,10 @@ export const LeadProfilePage: React.FC = () => {
             <div className="flex flex-wrap items-center gap-2 text-xs text-[#77796F]">
               <span className="font-mono">{lead.code}</span>
               <span aria-hidden="true">·</span>
+              <span className="px-2 py-0.5 rounded bg-[#E4EBE0] text-[#064E3B] font-medium">
+                Source: {lead.leadSource || 'Website'}
+              </span>
+              <span aria-hidden="true">·</span>
               <span>Agent: {agent?.name || 'Unassigned'}</span>
               <StatusTag status={lead.status} />
             </div>
@@ -165,6 +179,14 @@ export const LeadProfilePage: React.FC = () => {
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={() => setContactModalOpen(true)}
+              className="h-9 px-3.5 rounded-lg border border-[#E5E4DA] bg-[#FFFFFF] hover:bg-[#E4EBE0]/60 text-xs font-medium text-[#064E3B] flex items-center gap-1.5 cursor-pointer"
+            >
+              <MessageSquarePlus className="w-3.5 h-3.5" />
+              Log Contact
+            </button>
             <button
               type="button"
               onClick={() => setMatchModalOpen(true)}
@@ -223,10 +245,10 @@ export const LeadProfilePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Requirement & Summary */}
+      {/* Requirement, Last Contacted & Summary */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         <div className="lg:col-span-4 bg-[#151D18] text-[#FFFFFF] rounded-2xl p-6 space-y-4">
-          <h2 className="text-xs font-semibold text-[#A8B9A2]">Buyer Criteria</h2>
+          <h2 className="text-xs font-semibold text-[#A8B9A2]">Buyer Criteria &amp; Contact</h2>
           <div className="space-y-3 text-xs">
             <div>
               <span className="text-[#A8B9A2]">Budget Range</span>
@@ -245,16 +267,41 @@ export const LeadProfilePage: React.FC = () => {
                 <p className="font-medium mt-0.5">{lead.preferredLocation || 'Any'}</p>
               </div>
               <div>
-                <span className="text-[#A8B9A2]">Property Type</span>
-                <p className="font-medium mt-0.5">{lead.propertyType}</p>
+                <span className="text-[#A8B9A2]">Type / Category</span>
+                <p className="font-medium mt-0.5">
+                  {lead.propertyType} · {lead.propertyCategory || 'Any'}
+                </p>
+              </div>
+              <div>
+                <span className="text-[#A8B9A2]">Lead Source</span>
+                <p className="font-medium mt-0.5">{lead.leadSource || 'Website'}</p>
+              </div>
+              <div>
+                <span className="text-[#A8B9A2]">Next Follow-up</span>
+                <p className="font-mono mt-0.5">
+                  {lead.nextFollowUpDate ? formatDate(lead.nextFollowUpDate) : 'Not scheduled'}
+                </p>
               </div>
             </div>
-            <div className="pt-2 border-t border-[#243028]">
-              <span className="text-[#A8B9A2]">Next Follow-up</span>
-              <p className="font-mono mt-0.5">
-                {lead.nextFollowUpDate ? formatDate(lead.nextFollowUpDate) : 'Not scheduled'}
+
+            <div className="p-3 rounded-xl bg-[#1F2B24] border border-[#29382F] space-y-1">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-[#A8B9A2]">Last Contacted</span>
+                <span className="font-mono text-[#70A76B]">
+                  {formatDaysAgo(lead.lastContactedDate)}
+                </span>
+              </div>
+              <p className="font-medium text-[#FFFFFF]">
+                {lead.lastContactedDate ? formatDate(lead.lastContactedDate) : 'Not contacted yet'}
+                {lead.lastContactMethod ? ` · via ${lead.lastContactMethod}` : ''}
               </p>
+              {lead.lastConversationNotes && (
+                <p className="text-[11px] text-[#E4EBE0] leading-relaxed">
+                  {lead.lastConversationNotes}
+                </p>
+              )}
             </div>
+
             {lead.conversionDetails && (
               <div className="pt-2 border-t border-[#243028]">
                 <span className="text-[#70A76B]">Conversion Details</span>
@@ -287,7 +334,7 @@ export const LeadProfilePage: React.FC = () => {
         <div className="px-6 py-4 border-b border-[#E5E4DA] flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-[#20251F]">
-              Matched & Shared Properties ({matches.length})
+              Matched &amp; Shared Properties ({matches.length})
             </h2>
             <p className="text-[11px] text-[#77796F]">
               Track shared listings, buyer interest, site visits, and match outcomes.
@@ -346,13 +393,13 @@ export const LeadProfilePage: React.FC = () => {
                               {prop.title}
                             </button>
                             <p className="text-[11px] text-[#77796F]">
-                              {prop.location} · {prop.areaDisplay}
+                              {prop.code} · {prop.locality}, {prop.district} · {prop.areaDisplay}
                             </p>
                           </div>
                         </div>
                       </td>
                       <td className="py-3 px-3 font-mono tabular-nums font-semibold text-[#064E3B] whitespace-nowrap">
-                        {formatCurrency(prop.askingPrice, currency)}
+                        {formatCurrency(prop.expectedPrice ?? prop.askingPrice, currency)}
                       </td>
                       <td className="py-3 px-3 text-[11px] text-[#20251F] max-w-xs">
                         {m.matchReasons.slice(0, 2).join(' · ')}
@@ -525,6 +572,77 @@ export const LeadProfilePage: React.FC = () => {
         </div>
       </div>
 
+      {/* Log Contact Activity Modal */}
+      <Modal
+        open={contactModalOpen}
+        onClose={() => setContactModalOpen(false)}
+        title={`Log Contact Activity — ${lead.name}`}
+        subtitle="Automatically updates Last Contacted Date, Method & Conversation Notes."
+        maxWidthClass="max-w-md"
+      >
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!contactNotes.trim()) return;
+            updateDb(
+              (prev) =>
+                crmService.logContactActivity(prev, {
+                  relatedType: 'Lead',
+                  relatedId: lead.id,
+                  propertyId: matches[0]?.propertyId,
+                  contactMethod,
+                  notes: contactNotes,
+                }),
+              'Lead contact activity logged'
+            );
+            setContactNotes('');
+            setContactModalOpen(false);
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <label className="block text-xs font-medium mb-1">Contact Method *</label>
+            <select
+              value={contactMethod}
+              onChange={(e) => setContactMethod(e.target.value as ContactMethod)}
+              className="w-full h-9 px-2.5 text-xs border border-[#E5E4DA] rounded-lg"
+            >
+              {CONTACT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1">Conversation Notes *</label>
+            <textarea
+              rows={3}
+              required
+              value={contactNotes}
+              onChange={(e) => setContactNotes(e.target.value)}
+              placeholder="Summarize buyer feedback, budget flexibility, or site visit readiness..."
+              className="w-full p-2.5 text-xs border border-[#E5E4DA] rounded-lg"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setContactModalOpen(false)}
+              className="px-4 py-2 text-xs rounded-lg border border-[#E5E4DA] cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-xs font-medium rounded-lg bg-[#064E3B] text-[#FFFFFF] cursor-pointer"
+            >
+              Log Contact
+            </button>
+          </div>
+        </form>
+      </Modal>
+
       {/* Find Matching Properties Modal */}
       <Modal
         open={matchModalOpen}
@@ -571,14 +689,17 @@ export const LeadProfilePage: React.FC = () => {
                     <div className="flex-1 min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-sm font-semibold text-[#20251F]">
-                          {match.property.title}
+                          {match.property.code} · {match.property.title}
                         </span>
                         <span className="text-xs font-mono tabular-nums font-semibold text-[#064E3B]">
-                          {formatCurrency(match.property.askingPrice, currency)}
+                          {formatCurrency(
+                            match.property.expectedPrice ?? match.property.askingPrice,
+                            currency
+                          )}
                         </span>
                       </div>
                       <p className="text-xs text-[#77796F]">
-                        {match.property.type} · {match.property.location} ·{' '}
+                        {match.property.type} ({match.property.category}) · {match.property.location} ·{' '}
                         {match.property.areaDisplay}
                       </p>
                       <div className="pt-1 flex flex-wrap gap-2 text-[11px] text-[#064E3B]">
@@ -668,7 +789,7 @@ export const LeadProfilePage: React.FC = () => {
                 .filter((p) => p.status !== 'Sold')
                 .map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.title} ({p.location})
+                    {p.code} — {p.title} ({p.location})
                   </option>
                 ))}
             </select>

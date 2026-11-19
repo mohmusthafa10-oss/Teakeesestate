@@ -45,42 +45,49 @@ export function evaluateMatch(lead: Lead, property: Property, currency = '₹'):
   const reasons: string[] = [];
   let score = 0;
 
-  // 1. Property Type alignment
+  // 1. Property Type & Category alignment
   if (lead.propertyType === 'Any' || lead.propertyType === property.type) {
-    score += 25;
+    score += 22;
     reasons.push(
       lead.propertyType === 'Any'
         ? `Flexible property type (${property.type})`
         : `Exact property type: ${property.type}`
     );
   }
+  if (lead.propertyCategory && lead.propertyCategory !== 'Any' && lead.propertyCategory === property.category) {
+    score += 6;
+    reasons.push(`Category matches ${property.category}`);
+  }
 
-  // 2. Location matching
+  // 2. Location matching (structured locality, panchayath, district + location string)
   const prefLoc = lead.preferredLocation.toLowerCase().trim();
-  const propLoc = property.location.toLowerCase().trim();
-  const propDesc = property.description.toLowerCase();
+  const propLoc = `${property.location} ${property.locality || ''} ${property.panchayath || ''} ${property.district || ''}`
+    .toLowerCase()
+    .trim();
+  const propDesc = `${property.description} ${property.roadConnectivity || ''} ${property.nearbyLandmarks || ''}`.toLowerCase();
   if (prefLoc) {
     const locParts = prefLoc.split(/[\s,/]+/).filter((p) => p.length > 2);
     const matchedLoc = locParts.find(
       (part) => propLoc.includes(part) || propDesc.includes(part)
     );
     if (matchedLoc) {
-      score += 30;
-      reasons.push(`Location matches "${property.location}"`);
+      score += 28;
+      reasons.push(`Location matches "${property.locality || property.location}"`);
     }
   }
 
-  // 3. Budget fit
+  // 3. Budget fit against expectedPrice / askingPrice
+  const effectivePrice = property.expectedPrice || property.askingPrice;
   if (lead.maxBudget > 0) {
-    if (property.askingPrice >= lead.minBudget && property.askingPrice <= lead.maxBudget) {
-      score += 30;
+    if (effectivePrice >= lead.minBudget && effectivePrice <= lead.maxBudget) {
+      score += 28;
       reasons.push(
-        `Asking price ${formatCurrency(property.askingPrice, currency)} fits within ${formatCurrency(lead.minBudget, currency)}–${formatCurrency(lead.maxBudget, currency)} budget`
+        `Expected price ${formatCurrency(effectivePrice, currency)} fits within ${formatCurrency(lead.minBudget, currency)}–${formatCurrency(lead.maxBudget, currency)} budget`
       );
-    } else if (property.askingPrice <= lead.maxBudget * 1.15) {
-      score += 15;
+    } else if (effectivePrice <= lead.maxBudget * 1.15) {
+      score += 14;
       reasons.push(
-        `Asking price ${formatCurrency(property.askingPrice, currency)} is within 15% negotiation range of max budget`
+        `Expected price ${formatCurrency(effectivePrice, currency)} is within 15% negotiation range of max budget`
       );
     }
   }

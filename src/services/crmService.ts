@@ -1,7 +1,10 @@
 import { createSeedDatabase } from '../data/seedData';
 import {
   ActivityLog,
+  AdvancePaymentMethod,
+  AdvanceStatus,
   AgencySettings,
+  ContactMethod,
   CRMDatabase,
   Deal,
   Expense,
@@ -9,22 +12,260 @@ import {
   Investment,
   Investor,
   Lead,
+  PriceHistoryEntry,
   Property,
+  PropertyCategory,
   PropertyDocument,
   PropertyImage,
   PropertyMatch,
   PropertyStatus,
+  PropertyType,
   RentalBooking,
   RunningCategory,
   Seller,
+  SellerAdvance,
+  SellerRelationship,
   SiteVisit,
   Tenant,
   User,
 } from '../types/crm';
 import { generateId, getTodayISO } from '../utils/formatters';
+import { isValidLatLng } from '../utils/geo';
 
 const STORAGE_KEY = 're_crm_database_v1';
 export const DEFAULT_LOGO_URL = '/assets/aistudio/image_abc712d4.png';
+
+const DEFAULT_PROPERTY_TYPES: PropertyType[] = [
+  'Land',
+  'House',
+  'Apartment',
+  'Villa',
+  'Shop',
+  'Resort',
+];
+
+const DEFAULT_CATEGORY_GROUPS: PropertyCategory[] = [
+  'Residential',
+  'Commercial',
+  'Plantation',
+  'Agricultural',
+  'Development',
+  'Resort',
+];
+
+const DEFAULT_LEAD_SOURCES: string[] = [
+  'Instagram',
+  'Facebook',
+  'WhatsApp',
+  'Website',
+  'Referral',
+  'Walk-in',
+  'Phone Call',
+  'Advertisement',
+  'Existing Customer',
+  'Other',
+];
+
+function mapLegacyPropertyTypeAndCategory(
+  rawType: string,
+  existingCategory?: PropertyCategory
+): { type: PropertyType; category: PropertyCategory } {
+  switch (rawType) {
+    case 'Plot / Land':
+      return { type: 'Land', category: existingCategory || 'Residential' };
+    case 'Flat / Apartment':
+      return { type: 'Apartment', category: existingCategory || 'Residential' };
+    case 'Agriculture':
+      return { type: 'Land', category: existingCategory || 'Agricultural' };
+    case 'Commercial':
+      return { type: 'Shop', category: existingCategory || 'Commercial' };
+    case 'Other':
+      return { type: 'Land', category: existingCategory || 'Development' };
+    case 'Land':
+    case 'House':
+    case 'Apartment':
+    case 'Villa':
+    case 'Shop':
+    case 'Resort':
+      return { type: rawType, category: existingCategory || 'Residential' };
+    default:
+      return { type: 'Land', category: existingCategory || 'Residential' };
+  }
+}
+
+export const SELLER_RELATIONSHIPS: SellerRelationship[] = [
+  'Owner',
+  'Co-owner',
+  'Relative',
+  'Power of Attorney Holder',
+  'Broker / Agent',
+  'Authorized Representative',
+  'Other',
+];
+
+export const CONTACT_METHODS: ContactMethod[] = [
+  'Call',
+  'WhatsApp',
+  'Meeting',
+  'Email',
+  'Other',
+];
+
+export const ADVANCE_PAYMENT_METHODS: AdvancePaymentMethod[] = [
+  'Bank Transfer',
+  'UPI',
+  'Cash',
+  'Cheque',
+  'Other',
+];
+
+export const ADVANCE_STATUSES: AdvanceStatus[] = [
+  'Collected',
+  'Adjusted',
+  'Partially Refunded',
+  'Refunded',
+];
+
+export function nextTakCode(existingCodes: string[]): string {
+  const used = new Set(existingCodes.map((c) => c.toUpperCase()));
+  const maxNum = existingCodes.reduce((max, c) => {
+    const m = c.toUpperCase().match(/^TAK(\d+)$/);
+    return m ? Math.max(max, parseInt(m[1], 10)) : max;
+  }, 0);
+  let candidate = maxNum + 1;
+  while (used.has(`TAK${String(candidate).padStart(3, '0')}`)) {
+    candidate += 1;
+  }
+  return `TAK${String(candidate).padStart(3, '0')}`;
+}
+
+function migrateDatabase(parsed: CRMDatabase): { db: CRMDatabase; changed: boolean } {
+  let changed = false;
+  const db: CRMDatabase = { ...parsed };
+
+  if (db.settings.logoUrl === undefined) {
+    db.settings = { ...db.settings, logoUrl: DEFAULT_LOGO_URL };
+    changed = true;
+  }
+
+  if (!Array.isArray(db.sellerAdvances)) {
+    db.sellerAdvances = [];
+    changed = true;
+  }
+
+  if (!Array.isArray(db.settings.propertyCategoryGroups)) {
+    db.settings = { ...db.settings, propertyCategoryGroups: DEFAULT_CATEGORY_GROUPS };
+    changed = true;
+  }
+
+  if (!Array.isArray(db.settings.leadSources)) {
+    db.settings = { ...db.settings, leadSources: DEFAULT_LEAD_SOURCES };
+    changed = true;
+  }
+
+  const hasLegacyTypes = (db.settings.propertyCategories as string[]).some((t) =>
+    ['Plot / Land', 'Flat / Apartment', 'Agriculture', 'Commercial', 'Other'].includes(t)
+  );
+  if (hasLegacyTypes || !db.schemaVersion || db.schemaVersion < 2) {
+    db.settings = { ...db.settings, propertyCategories: DEFAULT_PROPERTY_TYPES };
+    changed = true;
+  }
+
+  if (!db.schemaVersion || db.schemaVersion < 2) {
+    // Migrate sellers
+    db.sellers = (db.sellers || []).map((s) => ({
+      ...s,
+      relationshipWithProperty: s.relationshipWithProperty || 'Owner',
+      lastContactedDate: s.lastContactedDate || s.lastContactAt || s.created_at,
+      lastContactMethod: s.lastContactMethod || 'Call',
+      lastConversationNotes: s.lastConversationNotes || '',
+    }));
+
+    // Migrate properties deterministically to TAK001+ if legacy PRP- codes exist
+    const existingTakCodes = (db.properties || [])
+      .map((p) => p.code)
+      .filter((c) => /^TAK\d+$/i.test(c));
+    const usedCodes = new Set(existingTakCodes.map((c) => c.toUpperCase()));
+
+    db.properties = (db.properties || []).map((p) => {
+      let code = p.code;
+      if (!/^TAK\d+$/i.test(code)) {
+        code = nextTakCode(Array.from(usedCodes));
+        usedCodes.add(code);
+      }
+      const mapped = mapLegacyPropertyTypeAndCategory(p.type as string, p.category);
+      const locParts = (p.location || '').split(',').map((s) => s.trim()).filter(Boolean);
+      const locality = p.locality || locParts[0] || 'Town Center';
+      const panchayath = p.panchayath || locParts[1] || locParts[0] || 'Municipality';
+      const district = p.district || locParts[2] || 'Kasaragod';
+      const expectedPrice = p.expectedPrice ?? p.askingPrice ?? 0;
+      const listedDate = p.listedDate || p.addedDate || p.created_at?.slice(0, 10) || getTodayISO();
+
+      return {
+        ...p,
+        code,
+        type: mapped.type,
+        category: mapped.category,
+        district,
+        panchayath,
+        locality,
+        roadConnectivity: p.roadConnectivity || 'Tar Road Access',
+        expectedPrice,
+        askingPrice: expectedPrice,
+        priceHistory: Array.isArray(p.priceHistory) ? p.priceHistory : [],
+        listedDate,
+        addedDate: p.addedDate || listedDate,
+        sellerRelationship: p.sellerRelationship || 'Owner',
+      };
+    });
+
+    // Migrate leads
+    db.leads = (db.leads || []).map((l) => {
+      const mappedType =
+        l.propertyType === ('Any' as any)
+          ? ('Any' as const)
+          : mapLegacyPropertyTypeAndCategory(l.propertyType as string).type;
+      return {
+        ...l,
+        leadSource: l.leadSource || 'Website',
+        propertyType: mappedType,
+        propertyCategory: l.propertyCategory || 'Any',
+        lastContactedDate: l.lastContactedDate || (l.status !== 'New' ? l.updated_at : undefined),
+        lastContactMethod: l.lastContactMethod || (l.status !== 'New' ? 'Call' : undefined),
+        lastConversationNotes: l.lastConversationNotes || '',
+      };
+    });
+
+    db.schemaVersion = 2;
+    changed = true;
+  }
+
+  if (db.schemaVersion < 3) {
+    db.properties = (db.properties || []).map((p) => {
+      const lat =
+        p.latitude !== undefined ? p.latitude : p.coordinates?.lat ?? null;
+      const lng =
+        p.longitude !== undefined ? p.longitude : p.coordinates?.lng ?? null;
+      const valid = isValidLatLng(lat, lng);
+      return {
+        ...p,
+        latitude: valid ? (lat as number) : null,
+        longitude: valid ? (lng as number) : null,
+        location_accuracy:
+          p.location_accuracy ||
+          (valid ? (p.id?.startsWith('prp-') ? 'Demo Coordinates' : 'Legacy Coordinates') : undefined),
+        location_updated_at:
+          p.location_updated_at || (valid ? p.updated_at || p.created_at : undefined),
+        isDemoData: p.isDemoData ?? ['prp-1', 'prp-2', 'prp-3', 'prp-4', 'prp-5', 'prp-6', 'prp-7', 'prp-8'].includes(p.id),
+        coordinates: valid ? { lat: lat as number, lng: lng as number } : null,
+      };
+    });
+    db.schemaVersion = 3;
+    changed = true;
+  }
+
+  return { db, changed };
+}
 
 function loadDatabase(): CRMDatabase {
   try {
@@ -40,11 +281,11 @@ function loadDatabase(): CRMDatabase {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
       return seed;
     }
-    if (parsed.settings.logoUrl === undefined) {
-      parsed.settings.logoUrl = DEFAULT_LOGO_URL;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    const { db, changed } = migrateDatabase(parsed);
+    if (changed) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
     }
-    return parsed;
+    return db;
   } catch {
     return createSeedDatabase();
   }
@@ -111,16 +352,36 @@ export const crmService = {
         phone: string;
         whatsapp: string;
         address: string;
+        relationshipWithProperty: SellerRelationship;
         notes?: string;
       };
       property: {
         title: string;
         type: Property['type'];
-        location: string;
+        category: PropertyCategory;
+        district: string;
+        panchayath: string;
+        locality: string;
+        fullAddress?: string;
+        googleMapsUrl?: string;
+        latitude?: number | null;
+        longitude?: number | null;
+        location_accuracy?: string;
         areaValue: number;
         areaUnit: Property['areaUnit'];
-        askingPrice: number;
+        roadConnectivity: string;
+        distanceToHighway?: string;
+        nearbyLandmarks?: string;
+        waterAvailability?: string;
+        terrain?: string;
+        frontage?: string;
+        electricity?: string;
+        boundaryDetails?: string;
+        otherFeatures?: string;
+        expectedPrice: number;
+        marketPrice?: number;
         description: string;
+        sellerRelationship?: SellerRelationship;
         assignedAgentId: string;
         status: PropertyStatus;
         isManaged?: boolean;
@@ -129,11 +390,43 @@ export const crmService = {
         images: { url: string; caption: string }[];
         documents: { name: string; docType: string; fileSize: string }[];
       };
+      advance?: {
+        collected: boolean;
+        amount: number;
+        collectionDate: string;
+        paymentMethod: AdvancePaymentMethod;
+        transactionReference: string;
+        remarks: string;
+      };
     }
   ): { db: CRMDatabase; property: Property; seller: Seller } {
     const now = new Date().toISOString();
     const today = getTodayISO();
     const actorId = db.settings.currentUserId;
+    const actorName = db.users.find((u) => u.id === actorId)?.name || 'Advisor';
+
+    if (!payload.property.title.trim()) throw new Error('Property title is required.');
+    if (!payload.property.district.trim()) throw new Error('District is required.');
+    if (!payload.property.panchayath.trim())
+      throw new Error('Panchayath / Municipality / Corporation is required.');
+    if (!payload.property.locality.trim()) throw new Error('Locality / Place is required.');
+    if (!payload.property.areaValue || payload.property.areaValue <= 0)
+      throw new Error('Area / Size is required.');
+    if (!payload.property.roadConnectivity.trim())
+      throw new Error('Road Connectivity is required.');
+    if (!payload.property.description.trim())
+      throw new Error('Property Description is required.');
+    if (!payload.property.expectedPrice || payload.property.expectedPrice <= 0)
+      throw new Error('Expected Price is required.');
+
+    if (payload.advance?.collected) {
+      if (!payload.advance.amount || payload.advance.amount <= 0) {
+        throw new Error('Advance Amount must be greater than zero.');
+      }
+      if (!payload.advance.collectionDate) {
+        throw new Error('Advance Collection Date is required.');
+      }
+    }
 
     let seller: Seller;
     let updatedSellers = [...db.sellers];
@@ -143,13 +436,12 @@ export const crmService = {
       if (!found) throw new Error('Selected seller record not found.');
       seller = {
         ...found,
-        lastContactAt: now,
         updated_at: now,
       };
       updatedSellers = updatedSellers.map((s) => (s.id === seller.id ? seller : s));
     } else {
-      if (!payload.seller || !payload.seller.name.trim()) {
-        throw new Error('Seller name is required.');
+      if (!payload.seller || !payload.seller.name.trim() || !payload.seller.phone.trim()) {
+        throw new Error('Seller name and phone number are required.');
       }
       seller = {
         id: generateId('slr'),
@@ -162,9 +454,13 @@ export const crmService = {
         phone: payload.seller.phone.trim(),
         whatsapp: (payload.seller.whatsapp || payload.seller.phone).trim(),
         address: payload.seller.address.trim(),
+        relationshipWithProperty: payload.seller.relationshipWithProperty || 'Owner',
         notes: payload.seller.notes?.trim() || '',
         assignedAgentId: payload.property.assignedAgentId,
         lastContactAt: now,
+        lastContactedDate: now,
+        lastContactMethod: 'Meeting',
+        lastConversationNotes: 'Initial property registration onboarding.',
         created_at: now,
         updated_at: now,
       };
@@ -173,33 +469,72 @@ export const crmService = {
 
     const areaDisplay = `${payload.property.areaValue} ${payload.property.areaUnit}`;
     const isManaged = Boolean(payload.property.isManaged);
+    const derivedLocation = [
+      payload.property.locality.trim(),
+      payload.property.panchayath.trim(),
+      payload.property.district.trim(),
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+    const hasPin = isValidLatLng(payload.property.latitude, payload.property.longitude);
+    const savedLat = hasPin ? Number(payload.property.latitude) : null;
+    const savedLng = hasPin ? Number(payload.property.longitude) : null;
+    const resolvedMapsUrl =
+      payload.property.googleMapsUrl?.trim() ||
+      (hasPin ? `https://www.google.com/maps?q=${savedLat},${savedLng}` : '');
+
     const property: Property = {
       id: generateId('prp'),
-      code: nextCode(
-        'PRP',
-        db.properties.map((p) => p.code),
-        2001
-      ),
+      code: nextTakCode(db.properties.map((p) => p.code)),
       title: payload.property.title.trim(),
       type: payload.property.type,
-      location: payload.property.location.trim(),
+      category: payload.property.category,
+      district: payload.property.district.trim(),
+      panchayath: payload.property.panchayath.trim(),
+      locality: payload.property.locality.trim(),
+      fullAddress: payload.property.fullAddress?.trim() || '',
+      googleMapsUrl: resolvedMapsUrl,
+      location: derivedLocation,
       areaValue: payload.property.areaValue,
       areaUnit: payload.property.areaUnit,
       areaDisplay,
-      askingPrice: payload.property.askingPrice,
+      roadConnectivity: payload.property.roadConnectivity.trim(),
+      distanceToHighway: payload.property.distanceToHighway?.trim() || '',
+      nearbyLandmarks: payload.property.nearbyLandmarks?.trim() || '',
+      waterAvailability: payload.property.waterAvailability?.trim() || '',
+      terrain: payload.property.terrain?.trim() || '',
+      frontage: payload.property.frontage?.trim() || '',
+      electricity: payload.property.electricity?.trim() || '',
+      boundaryDetails: payload.property.boundaryDetails?.trim() || '',
+      otherFeatures: payload.property.otherFeatures?.trim() || '',
+      expectedPrice: payload.property.expectedPrice,
+      marketPrice: payload.property.marketPrice || undefined,
+      askingPrice: payload.property.expectedPrice,
+      priceHistory: [],
       description: payload.property.description.trim(),
       sellerId: seller.id,
+      sellerRelationship:
+        payload.property.sellerRelationship || seller.relationshipWithProperty || 'Owner',
       status: payload.property.status,
       runningCategory: statusToRunningCategory(payload.property.status, isManaged),
       isManaged,
       assignedAgentId: payload.property.assignedAgentId,
       internalNotes: payload.property.internalNotes.trim(),
       nextFollowUpDate: payload.property.nextFollowUpDate,
+      listedDate: today,
       addedDate: today,
-      coordinates: {
-        lat: 12.2 + Math.random() * 0.25,
-        lng: 75.02 + Math.random() * 0.25,
-      },
+      latitude: savedLat,
+      longitude: savedLng,
+      location_accuracy: hasPin
+        ? payload.property.location_accuracy || 'Map Picker'
+        : undefined,
+      location_updated_at: hasPin ? now : undefined,
+      isDemoData: false,
+      coordinates:
+        hasPin && savedLat !== null && savedLng !== null
+          ? { lat: savedLat, lng: savedLng }
+          : null,
       created_at: now,
       updated_at: now,
     };
@@ -227,6 +562,30 @@ export const crmService = {
         uploadedAt: today,
       }));
 
+    let updatedAdvances = [...(db.sellerAdvances || [])];
+    if (payload.advance?.collected) {
+      const adv: SellerAdvance = {
+        id: generateId('adv'),
+        code: nextCode(
+          'ADV',
+          updatedAdvances.map((a) => a.code),
+          7001
+        ),
+        sellerId: seller.id,
+        propertyId: property.id,
+        amount: Number(payload.advance.amount),
+        collectionDate: payload.advance.collectionDate || today,
+        paymentMethod: payload.advance.paymentMethod || 'Bank Transfer',
+        transactionReference: payload.advance.transactionReference?.trim() || '',
+        status: 'Collected',
+        remarks: payload.advance.remarks?.trim() || '',
+        recordedBy: actorName,
+        created_at: now,
+        updated_at: now,
+      };
+      updatedAdvances = [adv, ...updatedAdvances];
+    }
+
     let updatedFollowUps = [...db.followUps];
     if (payload.property.nextFollowUpDate) {
       const fup: FollowUp = {
@@ -253,6 +612,7 @@ export const crmService = {
       properties: [property, ...db.properties],
       propertyImages: [...newImages, ...db.propertyImages],
       propertyDocuments: [...newDocs, ...db.propertyDocuments],
+      sellerAdvances: updatedAdvances,
       followUps: updatedFollowUps,
     };
 
@@ -261,7 +621,7 @@ export const crmService = {
         entityType: 'Seller',
         entityId: seller.id,
         action: 'Seller Registered',
-        summary: `New seller ${seller.name} registered with property ${property.title}`,
+        summary: `New seller ${seller.name} registered with property ${property.code} (${property.title})`,
         actorId,
       });
     } else {
@@ -269,7 +629,7 @@ export const crmService = {
         entityType: 'Property',
         entityId: property.id,
         action: 'Property Added',
-        summary: `Added ${property.title} under existing seller ${seller.name}`,
+        summary: `Added ${property.code} (${property.title}) under existing seller ${seller.name}`,
         actorId,
       });
     }
@@ -281,20 +641,106 @@ export const crmService = {
   updateProperty(
     db: CRMDatabase,
     propertyId: string,
-    updates: Partial<Property>
+    updates: Partial<Property> & { priceNote?: string }
   ): CRMDatabase {
     const now = new Date().toISOString();
+    const today = getTodayISO();
     const existing = db.properties.find((p) => p.id === propertyId);
     if (!existing) throw new Error('Property not found');
+
+    const actorName =
+      db.users.find((u) => u.id === db.settings.currentUserId)?.name || 'Advisor';
 
     const nextStatus = updates.status ?? existing.status;
     const nextIsManaged = updates.isManaged ?? existing.isManaged;
     const nextAreaVal = updates.areaValue ?? existing.areaValue;
     const nextAreaUnit = updates.areaUnit ?? existing.areaUnit;
 
+    const nextExpected =
+      updates.expectedPrice !== undefined
+        ? updates.expectedPrice
+        : updates.askingPrice !== undefined
+        ? updates.askingPrice
+        : existing.expectedPrice ?? existing.askingPrice;
+
+    const nextMarket =
+      updates.marketPrice !== undefined ? updates.marketPrice : existing.marketPrice;
+
+    const nextLocality = updates.locality ?? existing.locality;
+    const nextPanchayath = updates.panchayath ?? existing.panchayath;
+    const nextDistrict = updates.district ?? existing.district;
+    const derivedLocation =
+      updates.locality !== undefined ||
+      updates.panchayath !== undefined ||
+      updates.district !== undefined
+        ? [nextLocality, nextPanchayath, nextDistrict].filter(Boolean).join(', ')
+        : updates.location ?? existing.location;
+
+    // Record price change history if Expected Price or Market Price changed
+    let priceHistory = existing.priceHistory || [];
+    const expectedChanged = nextExpected !== (existing.expectedPrice ?? existing.askingPrice);
+    const marketChanged = nextMarket !== existing.marketPrice;
+    if (expectedChanged || marketChanged) {
+      const entry: PriceHistoryEntry = {
+        id: generateId('ph'),
+        date: today,
+        previousExpectedPrice: existing.expectedPrice ?? existing.askingPrice,
+        newExpectedPrice: nextExpected,
+        previousMarketPrice: existing.marketPrice,
+        newMarketPrice: nextMarket,
+        updatedBy: actorName,
+        note: updates.priceNote,
+      };
+      priceHistory = [entry, ...priceHistory];
+    }
+
+    const {
+      priceNote: _omitNote,
+      listedDate: _omitListed,
+      addedDate: _omitAdded,
+      code: _omitCode,
+      ...safeUpdates
+    } = updates;
+
+    const coordsProvided =
+      updates.latitude !== undefined || updates.longitude !== undefined;
+    let nextLat = existing.latitude ?? existing.coordinates?.lat ?? null;
+    let nextLng = existing.longitude ?? existing.coordinates?.lng ?? null;
+    let nextAccuracy = existing.location_accuracy;
+    let nextLocUpdatedAt = existing.location_updated_at;
+
+    if (coordsProvided) {
+      if (isValidLatLng(updates.latitude, updates.longitude)) {
+        nextLat = Number(updates.latitude);
+        nextLng = Number(updates.longitude);
+        nextAccuracy = updates.location_accuracy || 'Map Picker';
+        nextLocUpdatedAt = now;
+      } else {
+        nextLat = null;
+        nextLng = null;
+        nextAccuracy = undefined;
+        nextLocUpdatedAt = now;
+      }
+    }
+
     const updatedProp: Property = {
       ...existing,
-      ...updates,
+      ...safeUpdates,
+      // Permanently preserve property code and original listing dates
+      code: existing.code,
+      listedDate: existing.listedDate || existing.addedDate,
+      addedDate: existing.addedDate,
+      location: derivedLocation,
+      latitude: nextLat,
+      longitude: nextLng,
+      location_accuracy: nextAccuracy,
+      location_updated_at: nextLocUpdatedAt,
+      coordinates:
+        nextLat !== null && nextLng !== null ? { lat: nextLat, lng: nextLng } : null,
+      expectedPrice: nextExpected,
+      marketPrice: nextMarket,
+      askingPrice: nextExpected,
+      priceHistory,
       areaDisplay: updates.areaDisplay ?? `${nextAreaVal} ${nextAreaUnit}`,
       runningCategory:
         updates.runningCategory ?? statusToRunningCategory(nextStatus, nextIsManaged),
@@ -311,7 +757,15 @@ export const crmService = {
         entityType: 'Property',
         entityId: propertyId,
         action: 'Status Updated',
-        summary: `${existing.title} changed from ${existing.status} to ${updates.status}`,
+        summary: `${existing.code} (${existing.title}) changed from ${existing.status} to ${updates.status}`,
+        actorId: db.settings.currentUserId,
+      });
+    } else if (expectedChanged || marketChanged) {
+      nextDb.activityLogs = this.appendActivity(nextDb, {
+        entityType: 'Property',
+        entityId: propertyId,
+        action: 'Pricing Updated',
+        summary: `Updated pricing for ${updatedProp.code} (${updatedProp.title})`,
         actorId: db.settings.currentUserId,
       });
     } else {
@@ -319,7 +773,7 @@ export const crmService = {
         entityType: 'Property',
         entityId: propertyId,
         action: 'Property Updated',
-        summary: `Updated details for ${updatedProp.title}`,
+        summary: `Updated details for ${updatedProp.code} (${updatedProp.title})`,
         actorId: db.settings.currentUserId,
       });
     }
@@ -421,10 +875,18 @@ export const crmService = {
   ): CRMDatabase {
     const now = new Date().toISOString();
     if (input.id) {
+      // Protect last-contacted fields from being overwritten by unrelated profile edits
+      const {
+        lastContactAt: _lcAt,
+        lastContactedDate: _lcDate,
+        lastContactMethod: _lcMethod,
+        lastConversationNotes: _lcNotes,
+        ...safeInput
+      } = input;
       const nextDb: CRMDatabase = {
         ...db,
         sellers: db.sellers.map((s) =>
-          s.id === input.id ? { ...s, ...input, updated_at: now } : s
+          s.id === input.id ? { ...s, ...safeInput, updated_at: now } : s
         ),
       };
       saveDatabase(nextDb);
@@ -441,9 +903,13 @@ export const crmService = {
       phone: input.phone.trim(),
       whatsapp: (input.whatsapp || input.phone).trim(),
       address: input.address?.trim() || '',
+      relationshipWithProperty: input.relationshipWithProperty || 'Owner',
       notes: input.notes?.trim() || '',
       assignedAgentId: input.assignedAgentId || db.settings.currentUserId,
       lastContactAt: now,
+      lastContactedDate: now,
+      lastContactMethod: 'Call',
+      lastConversationNotes: 'Initial seller profile registration.',
       created_at: now,
       updated_at: now,
     };
@@ -480,6 +946,101 @@ export const crmService = {
     return nextDb;
   },
 
+  // Seller Advance Collection CRUD (Financial tracking only, not sales revenue)
+  addSellerAdvance(
+    db: CRMDatabase,
+    input: {
+      sellerId: string;
+      propertyId: string;
+      amount: number;
+      collectionDate: string;
+      paymentMethod: AdvancePaymentMethod;
+      transactionReference: string;
+      remarks?: string;
+    }
+  ): CRMDatabase {
+    if (!input.amount || input.amount <= 0) {
+      throw new Error('Advance amount must be greater than zero.');
+    }
+    if (!input.collectionDate) {
+      throw new Error('Collection date is required.');
+    }
+    const now = new Date().toISOString();
+    const actorName =
+      db.users.find((u) => u.id === db.settings.currentUserId)?.name || 'Advisor';
+    const existingAdvances = db.sellerAdvances || [];
+    const adv: SellerAdvance = {
+      id: generateId('adv'),
+      code: nextCode(
+        'ADV',
+        existingAdvances.map((a) => a.code),
+        7001
+      ),
+      sellerId: input.sellerId,
+      propertyId: input.propertyId,
+      amount: Number(input.amount),
+      collectionDate: input.collectionDate,
+      paymentMethod: input.paymentMethod,
+      transactionReference: input.transactionReference.trim(),
+      status: 'Collected',
+      remarks: input.remarks?.trim() || '',
+      recordedBy: actorName,
+      created_at: now,
+      updated_at: now,
+    };
+    const prop = db.properties.find((p) => p.id === input.propertyId);
+    const nextDb: CRMDatabase = {
+      ...db,
+      sellerAdvances: [adv, ...existingAdvances],
+    };
+    nextDb.activityLogs = this.appendActivity(nextDb, {
+      entityType: 'Advance',
+      entityId: adv.id,
+      action: 'Advance Recorded',
+      summary: `Recorded seller advance ${adv.code} for ${prop?.code || 'property'}`,
+      actorId: db.settings.currentUserId,
+    });
+    saveDatabase(nextDb);
+    return nextDb;
+  },
+
+  updateSellerAdvance(
+    db: CRMDatabase,
+    advanceId: string,
+    updates: {
+      status: AdvanceStatus;
+      refundAmount?: number;
+      refundDate?: string;
+      adjustedDealId?: string;
+      remarks?: string;
+    }
+  ): CRMDatabase {
+    const now = new Date().toISOString();
+    const existing = (db.sellerAdvances || []).find((a) => a.id === advanceId);
+    if (!existing) throw new Error('Advance record not found.');
+    const nextDb: CRMDatabase = {
+      ...db,
+      sellerAdvances: (db.sellerAdvances || []).map((a) =>
+        a.id === advanceId
+          ? {
+              ...a,
+              ...updates,
+              updated_at: now,
+            }
+          : a
+      ),
+    };
+    nextDb.activityLogs = this.appendActivity(nextDb, {
+      entityType: 'Advance',
+      entityId: advanceId,
+      action: `Advance ${updates.status}`,
+      summary: `${existing.code} marked ${updates.status}`,
+      actorId: db.settings.currentUserId,
+    });
+    saveDatabase(nextDb);
+    return nextDb;
+  },
+
   // Leads CRUD (Independent of properties)
   upsertLead(
     db: CRMDatabase,
@@ -488,10 +1049,17 @@ export const crmService = {
     const now = new Date().toISOString();
     if (input.id) {
       const existing = db.leads.find((l) => l.id === input.id);
+      // Protect last-contacted fields from unrelated profile edits
+      const {
+        lastContactedDate: _lcDate,
+        lastContactMethod: _lcMethod,
+        lastConversationNotes: _lcNotes,
+        ...safeInput
+      } = input;
       const nextDb: CRMDatabase = {
         ...db,
         leads: db.leads.map((l) =>
-          l.id === input.id ? { ...l, ...input, updated_at: now } : l
+          l.id === input.id ? { ...l, ...safeInput, updated_at: now } : l
         ),
       };
       if (existing && input.status && input.status !== existing.status) {
@@ -517,10 +1085,12 @@ export const crmService = {
       name: input.name.trim(),
       phone: input.phone.trim(),
       whatsapp: (input.whatsapp || input.phone).trim(),
+      leadSource: input.leadSource || db.settings.leadSources?.[0] || 'Website',
       preferredLocation: input.preferredLocation?.trim() || '',
       minBudget: Number(input.minBudget) || 0,
       maxBudget: Number(input.maxBudget) || 0,
       propertyType: input.propertyType || 'Any',
+      propertyCategory: input.propertyCategory || 'Any',
       requirementDescription: input.requirementDescription?.trim() || '',
       status: input.status || 'New',
       assignedAgentId: input.assignedAgentId || db.settings.currentUserId,
@@ -560,7 +1130,7 @@ export const crmService = {
       entityType: 'Lead',
       entityId: lead.id,
       action: 'Lead Registered',
-      summary: `New buyer lead ${lead.name} looking in ${lead.preferredLocation || 'any location'}`,
+      summary: `New buyer lead ${lead.name} (${lead.leadSource}) looking in ${lead.preferredLocation || 'any location'}`,
       actorId: db.settings.currentUserId,
     });
     saveDatabase(nextDb);
@@ -735,11 +1305,8 @@ export const crmService = {
       followUps: [fup, ...db.followUps],
     };
 
-    if (fup.relatedType === 'Seller') {
-      nextDb.sellers = nextDb.sellers.map((s) =>
-        s.id === fup.relatedId ? { ...s, lastContactAt: now, updated_at: now } : s
-      );
-    }
+    // Note: Scheduling a future pending task does not overwrite Last Contacted;
+    // Last Contacted is automatically updated when a contact activity is completed.
 
     nextDb.activityLogs = this.appendActivity(nextDb, {
       entityType: 'FollowUp',
@@ -757,11 +1324,25 @@ export const crmService = {
     db: CRMDatabase,
     followUpId: string,
     completionNotes: string,
-    nextFollowUp?: { date: string; time: string; title: string; activityType: FollowUp['activityType'] }
+    nextFollowUp?: { date: string; time: string; title: string; activityType: FollowUp['activityType'] },
+    contactMethodOverride?: ContactMethod
   ): CRMDatabase {
     const now = new Date().toISOString();
     const target = db.followUps.find((f) => f.id === followUpId);
     if (!target) return db;
+
+    const methodMap: Record<FollowUp['activityType'], ContactMethod> = {
+      Call: 'Call',
+      WhatsApp: 'WhatsApp',
+      Meeting: 'Meeting',
+      'Site Visit': 'Meeting',
+      Email: 'Email',
+      Other: 'Other',
+    };
+    const resolvedMethod: ContactMethod =
+      contactMethodOverride || methodMap[target.activityType] || 'Other';
+    const conversationNote =
+      completionNotes.trim() || target.notes?.trim() || target.title;
 
     let followUps = db.followUps.map((f) =>
       f.id === followUpId
@@ -796,14 +1377,23 @@ export const crmService = {
       ];
     }
 
-    let nextDb: CRMDatabase = {
+    const nextDb: CRMDatabase = {
       ...db,
       followUps,
     };
 
     if (target.relatedType === 'Seller') {
       nextDb.sellers = nextDb.sellers.map((s) =>
-        s.id === target.relatedId ? { ...s, lastContactAt: now, updated_at: now } : s
+        s.id === target.relatedId
+          ? {
+              ...s,
+              lastContactAt: now,
+              lastContactedDate: now,
+              lastContactMethod: resolvedMethod,
+              lastConversationNotes: conversationNote,
+              updated_at: now,
+            }
+          : s
       );
     } else {
       nextDb.leads = nextDb.leads.map((l) =>
@@ -811,6 +1401,9 @@ export const crmService = {
           ? {
               ...l,
               nextFollowUpDate: nextFollowUp?.date || l.nextFollowUpDate,
+              lastContactedDate: now,
+              lastContactMethod: resolvedMethod,
+              lastConversationNotes: conversationNote,
               updated_at: now,
             }
           : l
@@ -821,7 +1414,91 @@ export const crmService = {
       entityType: 'FollowUp',
       entityId: followUpId,
       action: 'Follow-up Completed',
-      summary: `Completed ${target.activityType}: ${target.title}`,
+      summary: `Completed ${resolvedMethod} follow-up: ${target.title}`,
+      actorId: db.settings.currentUserId,
+    });
+
+    saveDatabase(nextDb);
+    return nextDb;
+  },
+
+  logContactActivity(
+    db: CRMDatabase,
+    payload: {
+      relatedType: 'Lead' | 'Seller';
+      relatedId: string;
+      propertyId?: string;
+      contactMethod: ContactMethod;
+      notes: string;
+    }
+  ): CRMDatabase {
+    const now = new Date().toISOString();
+    const today = getTodayISO();
+    const nowTime = new Date().toTimeString().slice(0, 5);
+    const noteText = payload.notes.trim();
+    if (!noteText) throw new Error('Conversation notes are required.');
+
+    const contactName =
+      payload.relatedType === 'Lead'
+        ? db.leads.find((l) => l.id === payload.relatedId)?.name || 'Lead'
+        : db.sellers.find((s) => s.id === payload.relatedId)?.name || 'Seller';
+
+    const fup: FollowUp = {
+      id: generateId('fup'),
+      title: `${payload.contactMethod} with ${contactName}`,
+      relatedType: payload.relatedType,
+      relatedId: payload.relatedId,
+      propertyId: payload.propertyId || undefined,
+      assignedAgentId: db.settings.currentUserId,
+      date: today,
+      time: nowTime,
+      activityType: payload.contactMethod,
+      notes: noteText,
+      status: 'Completed',
+      completedAt: now,
+      created_at: now,
+      updated_at: now,
+    };
+
+    const nextDb: CRMDatabase = {
+      ...db,
+      followUps: [fup, ...db.followUps],
+      sellers:
+        payload.relatedType === 'Seller'
+          ? db.sellers.map((s) =>
+              s.id === payload.relatedId
+                ? {
+                    ...s,
+                    lastContactAt: now,
+                    lastContactedDate: now,
+                    lastContactMethod: payload.contactMethod,
+                    lastConversationNotes: noteText,
+                    updated_at: now,
+                  }
+                : s
+            )
+          : db.sellers,
+      leads:
+        payload.relatedType === 'Lead'
+          ? db.leads.map((l) =>
+              l.id === payload.relatedId
+                ? {
+                    ...l,
+                    lastContactedDate: now,
+                    lastContactMethod: payload.contactMethod,
+                    lastConversationNotes: noteText,
+                    updated_at: now,
+                  }
+                : l
+            )
+          : db.leads,
+    };
+
+    nextDb.activityLogs = this.appendActivity(nextDb, {
+      entityType: 'FollowUp',
+      entityId: fup.id,
+      action: `${payload.contactMethod} Logged`,
+      summary: `${payload.contactMethod} with ${contactName}: ${noteText.slice(0, 80)}`,
       actorId: db.settings.currentUserId,
     });
 

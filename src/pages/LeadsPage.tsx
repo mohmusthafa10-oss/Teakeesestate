@@ -2,8 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { crmService } from '../services/crmService';
-import { Lead, LeadStatus, PropertyType } from '../types/crm';
-import { formatCurrency, formatDate, getTodayISO } from '../utils/formatters';
+import { Lead, LeadStatus, PropertyCategory, PropertyType } from '../types/crm';
+import {
+  formatCurrency,
+  formatDate,
+  formatDaysAgo,
+  getTodayISO,
+} from '../utils/formatters';
 import {
   ConfirmDialog,
   EmptyState,
@@ -18,6 +23,7 @@ export const LeadsPage: React.FC = () => {
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState(route.filterStatus || 'All');
+  const [sourceFilter, setSourceFilter] = useState(route.filterSource || 'All');
   const [typeFilter, setTypeFilter] = useState('All');
   const [agentFilter, setAgentFilter] = useState('All');
   const [page, setPage] = useState(1);
@@ -31,10 +37,14 @@ export const LeadsPage: React.FC = () => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [whatsapp, setWhatsapp] = useState('');
+  const [leadSource, setLeadSource] = useState<string>(
+    db.settings.leadSources?.[0] || 'Instagram'
+  );
   const [preferredLocation, setPreferredLocation] = useState('');
   const [minBudget, setMinBudget] = useState('');
   const [maxBudget, setMaxBudget] = useState('');
-  const [propertyType, setPropertyType] = useState<PropertyType | 'Any'>('Plot / Land');
+  const [propertyType, setPropertyType] = useState<PropertyType | 'Any'>('Land');
+  const [propertyCategory, setPropertyCategory] = useState<PropertyCategory | 'Any'>('Any');
   const [requirementDescription, setRequirementDescription] = useState('');
   const [assignedAgentId, setAssignedAgentId] = useState(currentUser.id);
   const [status, setStatus] = useState<LeadStatus>('New');
@@ -48,15 +58,24 @@ export const LeadsPage: React.FC = () => {
     }
   }, [route.filterStatus]);
 
+  useEffect(() => {
+    if (route.filterSource) {
+      setSourceFilter(route.filterSource);
+      setPage(1);
+    }
+  }, [route.filterSource]);
+
   const openAddModal = () => {
     setEditingLead(null);
     setName('');
     setPhone('');
     setWhatsapp('');
+    setLeadSource(db.settings.leadSources?.[0] || 'Instagram');
     setPreferredLocation('');
     setMinBudget('');
     setMaxBudget('');
-    setPropertyType('Plot / Land');
+    setPropertyType(db.settings.propertyCategories[0] || 'Land');
+    setPropertyCategory('Any');
     setRequirementDescription('');
     setAssignedAgentId(currentUser.id);
     setStatus('New');
@@ -70,10 +89,12 @@ export const LeadsPage: React.FC = () => {
     setName(lead.name);
     setPhone(lead.phone);
     setWhatsapp(lead.whatsapp);
+    setLeadSource(lead.leadSource || db.settings.leadSources?.[0] || 'Website');
     setPreferredLocation(lead.preferredLocation);
     setMinBudget(String(lead.minBudget || ''));
     setMaxBudget(String(lead.maxBudget || ''));
     setPropertyType(lead.propertyType);
+    setPropertyCategory(lead.propertyCategory || 'Any');
     setRequirementDescription(lead.requirementDescription);
     setAssignedAgentId(lead.assignedAgentId);
     setStatus(lead.status);
@@ -90,16 +111,18 @@ export const LeadsPage: React.FC = () => {
           l.name.toLowerCase().includes(q) ||
           l.code.toLowerCase().includes(q) ||
           l.phone.includes(q) ||
+          (l.leadSource || '').toLowerCase().includes(q) ||
           l.preferredLocation.toLowerCase().includes(q) ||
           l.requirementDescription.toLowerCase().includes(q);
         if (!hit) return false;
       }
       if (statusFilter !== 'All' && l.status !== statusFilter) return false;
+      if (sourceFilter !== 'All' && l.leadSource !== sourceFilter) return false;
       if (typeFilter !== 'All' && l.propertyType !== typeFilter) return false;
       if (agentFilter !== 'All' && l.assignedAgentId !== agentFilter) return false;
       return true;
     });
-  }, [visibleLeads, search, statusFilter, typeFilter, agentFilter]);
+  }, [visibleLeads, search, statusFilter, sourceFilter, typeFilter, agentFilter]);
 
   const paged = useMemo(
     () => filtered.slice((page - 1) * pageSize, page * pageSize),
@@ -119,17 +142,21 @@ export const LeadsPage: React.FC = () => {
           name,
           phone,
           whatsapp: whatsapp || phone,
+          leadSource,
           preferredLocation,
           minBudget: Number(minBudget) || 0,
           maxBudget: Number(maxBudget) || 0,
           propertyType,
+          propertyCategory,
           requirementDescription,
           assignedAgentId,
           status,
           nextFollowUpDate,
           notes,
         }),
-      editingLead ? 'Lead details updated' : 'Buyer lead registered'
+      editingLead
+        ? 'Lead details updated (last-contacted log preserved)'
+        : 'Buyer lead registered'
     );
     if (ok) setLeadModalOpen(false);
   };
@@ -139,10 +166,10 @@ export const LeadsPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[#20251F]">
-            Buyer Leads & Requirements
+            Buyer Leads &amp; Requirements
           </h1>
           <p className="text-xs text-[#77796F] mt-1">
-            Independent buyer requirements. Register a lead anytime and match properties directly from their profile.
+            Independent buyer inquiries with configurable lead source tracking and automated last-contacted logs.
           </p>
         </div>
         <button
@@ -166,11 +193,26 @@ export const LeadsPage: React.FC = () => {
               setSearch(e.target.value);
               setPage(1);
             }}
-            placeholder="Search customer, ID, phone, location, or requirement..."
+            placeholder="Search customer, ID, phone, source, location, or requirement..."
             className="w-full h-9 pl-9 pr-3 text-xs bg-[#F1F0E8]/60 border border-[#E5E4DA] rounded-lg focus:outline-none focus:bg-[#FFFFFF] focus:border-[#064E3B]"
           />
         </div>
         <div className="flex flex-wrap gap-2">
+          <select
+            value={sourceFilter}
+            onChange={(e) => {
+              setSourceFilter(e.target.value);
+              setPage(1);
+            }}
+            className="h-9 px-2.5 text-xs bg-[#FFFFFF] border border-[#E5E4DA] rounded-lg"
+          >
+            <option value="All">All Lead Sources</option>
+            {db.settings.leadSources.map((src) => (
+              <option key={src} value={src}>
+                {src}
+              </option>
+            ))}
+          </select>
           <select
             value={statusFilter}
             onChange={(e) => {
@@ -235,13 +277,12 @@ export const LeadsPage: React.FC = () => {
                 <tr className="border-b border-[#E5E4DA] bg-[#F1F0E8]/50 text-[11px] font-semibold text-[#77796F]">
                   <th className="py-3 px-4">Lead ID</th>
                   <th className="py-3 px-3">Customer Name</th>
-                  <th className="py-3 px-3">Phone</th>
+                  <th className="py-3 px-3">Source</th>
                   <th className="py-3 px-3">Preferred Location</th>
                   <th className="py-3 px-3">Budget</th>
-                  <th className="py-3 px-3">Type</th>
-                  <th className="py-3 px-3">Requirement Summary</th>
+                  <th className="py-3 px-3">Type / Category</th>
+                  <th className="py-3 px-3">Last Contacted</th>
                   <th className="py-3 px-3">Status</th>
-                  <th className="py-3 px-3">Agent</th>
                   <th className="py-3 px-3">Next Follow-up</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
@@ -262,9 +303,14 @@ export const LeadsPage: React.FC = () => {
                       >
                         {lead.name}
                       </button>
+                      <p className="text-[11px] font-mono text-[#77796F]">
+                        {lead.phone} · {getAgentName(lead.assignedAgentId)}
+                      </p>
                     </td>
-                    <td className="py-3 px-3 font-mono tabular-nums whitespace-nowrap">
-                      {lead.phone}
+                    <td className="py-3 px-3 whitespace-nowrap">
+                      <span className="px-2 py-0.5 rounded bg-[#F1F0E8] border border-[#E5E4DA] text-[11px] font-medium text-[#20251F]">
+                        {lead.leadSource || 'Other'}
+                      </span>
                     </td>
                     <td className="py-3 px-3 text-[#20251F] whitespace-nowrap">
                       {lead.preferredLocation || 'Flexible'}
@@ -277,17 +323,25 @@ export const LeadsPage: React.FC = () => {
                           )}`
                         : 'Open'}
                     </td>
-                    <td className="py-3 px-3 whitespace-nowrap">{lead.propertyType}</td>
-                    <td className="py-3 px-3 max-w-[230px]">
-                      <p className="text-[#77796F] truncate">
-                        {lead.requirementDescription}
+                    <td className="py-3 px-3 whitespace-nowrap">
+                      <p className="text-[#20251F]">{lead.propertyType}</p>
+                      <p className="text-[11px] text-[#77796F]">
+                        {lead.propertyCategory || 'Any'}
                       </p>
+                    </td>
+                    <td className="py-3 px-3 max-w-[200px]">
+                      <p className="text-[11px] font-medium text-[#20251F] whitespace-nowrap">
+                        {formatDaysAgo(lead.lastContactedDate)}
+                        {lead.lastContactMethod ? ` · ${lead.lastContactMethod}` : ''}
+                      </p>
+                      {lead.lastConversationNotes && (
+                        <p className="text-[10px] text-[#77796F] truncate">
+                          {lead.lastConversationNotes}
+                        </p>
+                      )}
                     </td>
                     <td className="py-3 px-3">
                       <StatusTag status={lead.status} />
-                    </td>
-                    <td className="py-3 px-3 whitespace-nowrap">
-                      {getAgentName(lead.assignedAgentId)}
                     </td>
                     <td className="py-3 px-3 font-mono tabular-nums text-[11px] text-[#77796F] whitespace-nowrap">
                       {lead.nextFollowUpDate ? formatDate(lead.nextFollowUpDate) : '—'}
@@ -341,7 +395,11 @@ export const LeadsPage: React.FC = () => {
         open={leadModalOpen}
         onClose={() => setLeadModalOpen(false)}
         title={editingLead ? `Edit Lead — ${editingLead.name}` : 'Register Independent Buyer Lead'}
-        subtitle="No property selection required during lead registration."
+        subtitle={
+          editingLead
+            ? 'Editing lead requirements preserves last-contacted history.'
+            : 'No property selection required during lead registration.'
+        }
       >
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -378,6 +436,20 @@ export const LeadsPage: React.FC = () => {
               />
             </div>
             <div>
+              <label className="block text-xs font-medium mb-1">Lead Source *</label>
+              <select
+                value={leadSource}
+                onChange={(e) => setLeadSource(e.target.value)}
+                className="w-full h-9 px-2.5 text-xs border border-[#E5E4DA] rounded-lg"
+              >
+                {db.settings.leadSources.map((src) => (
+                  <option key={src} value={src}>
+                    {src}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="sm:col-span-2">
               <label className="block text-xs font-medium mb-1">Preferred Location</label>
               <input
                 type="text"
@@ -427,6 +499,23 @@ export const LeadsPage: React.FC = () => {
               </select>
             </div>
             <div>
+              <label className="block text-xs font-medium mb-1">Property Category</label>
+              <select
+                value={propertyCategory}
+                onChange={(e) =>
+                  setPropertyCategory(e.target.value as PropertyCategory | 'Any')
+                }
+                className="w-full h-9 px-2.5 text-xs border border-[#E5E4DA] rounded-lg"
+              >
+                <option value="Any">Any Category</option>
+                {db.settings.propertyCategoryGroups.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
               <label className="block text-xs font-medium mb-1">Lead Status</label>
               <select
                 value={status}
@@ -454,7 +543,7 @@ export const LeadsPage: React.FC = () => {
                 ))}
               </select>
             </div>
-            <div>
+            <div className="sm:col-span-2">
               <label className="block text-xs font-medium mb-1">Follow-up Date</label>
               <input
                 type="date"

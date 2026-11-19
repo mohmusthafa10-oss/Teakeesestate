@@ -273,12 +273,16 @@ export const RunningPropertiesPage: React.FC = () => {
                         )}
                       </td>
                       <td className="py-3 px-3 text-[#77796F] whitespace-nowrap">
-                        {prop.location}
+                        <p className="text-[#20251F]">{prop.locality || prop.location}</p>
+                        <p className="text-[11px]">{prop.district}</p>
                       </td>
                       <td className="py-3 px-3 font-mono tabular-nums font-semibold text-[#064E3B] whitespace-nowrap">
-                        {formatCurrency(prop.askingPrice, currency)}
+                        {formatCurrency(prop.expectedPrice ?? prop.askingPrice, currency)}
                       </td>
-                      <td className="py-3 px-3 whitespace-nowrap">{prop.type}</td>
+                      <td className="py-3 px-3 whitespace-nowrap">
+                        <p className="text-[#20251F]">{prop.type}</p>
+                        <p className="text-[11px] text-[#77796F]">{prop.category}</p>
+                      </td>
                       <td className="py-3 px-3">
                         <select
                           value={prop.status}

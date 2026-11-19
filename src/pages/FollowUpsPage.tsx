@@ -10,8 +10,8 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
-import { crmService } from '../services/crmService';
-import { FollowUp, FollowUpActivityType } from '../types/crm';
+import { CONTACT_METHODS, crmService } from '../services/crmService';
+import { ContactMethod, FollowUp, FollowUpActivityType } from '../types/crm';
 import { formatDate, getTodayISO, offsetDaysISO } from '../utils/formatters';
 import {
   EmptyState,
@@ -53,6 +53,7 @@ export const FollowUpsPage: React.FC = () => {
 
   // Complete + Chain Next Follow-up Modal
   const [completing, setCompleting] = useState<FollowUp | null>(null);
+  const [contactMethod, setContactMethod] = useState<ContactMethod>('Call');
   const [completionNotes, setCompletionNotes] = useState('');
   const [scheduleNext, setScheduleNext] = useState(true);
   const [nextDate, setNextDate] = useState(offsetDaysISO(3));
@@ -122,6 +123,13 @@ export const FollowUpsPage: React.FC = () => {
 
   const openCompleteModal = (fup: FollowUp) => {
     setCompleting(fup);
+    const defaultMethod: ContactMethod =
+      fup.activityType === 'Site Visit'
+        ? 'Meeting'
+        : CONTACT_METHODS.includes(fup.activityType as ContactMethod)
+        ? (fup.activityType as ContactMethod)
+        : 'Other';
+    setContactMethod(defaultMethod);
     setCompletionNotes('');
     setScheduleNext(true);
     setNextDate(offsetDaysISO(3));
@@ -723,16 +731,36 @@ export const FollowUpsPage: React.FC = () => {
                         title: nextTitle,
                         activityType: nextType,
                       }
-                    : undefined
+                    : undefined,
+                  contactMethod
                 ),
               scheduleNext
-                ? 'Follow-up completed & next reminder scheduled'
-                : 'Follow-up marked completed'
+                ? 'Follow-up completed, Last Contacted updated & next reminder scheduled'
+                : 'Follow-up completed & Last Contacted updated'
             );
             setCompleting(null);
           }}
           className="space-y-4"
         >
+          <div className="p-3 rounded-xl bg-[#E4EBE0]/50 border border-[#A8B9A2]/50 text-[11px] text-[#064E3B]">
+            Completing this activity automatically updates Last Contacted Date, Contact Method, and Conversation Notes on the linked {completing?.relatedType || 'contact'} profile.
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1">
+              Contact Method *
+            </label>
+            <select
+              value={contactMethod}
+              onChange={(e) => setContactMethod(e.target.value as ContactMethod)}
+              className="w-full h-9 px-2.5 text-xs bg-[#FFFFFF] border border-[#E5E4DA] rounded-lg"
+            >
+              {CONTACT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
           <div>
             <label className="block text-xs font-medium mb-1">
               Conversation Notes / Outcome

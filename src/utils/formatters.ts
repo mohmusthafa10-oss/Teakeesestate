@@ -60,6 +60,33 @@ export function formatDateTime(isoStr?: string): string {
   });
 }
 
+export function calculateDaysSince(dateStr?: string): number {
+  if (!dateStr) return 0;
+  const clean = dateStr.includes('T') ? dateStr.slice(0, 10) : dateStr.slice(0, 10);
+  const start = new Date(`${clean}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return 0;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diffMs = today.getTime() - start.getTime();
+  return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+}
+
+export function formatDaysListed(listedDate?: string): string {
+  if (!listedDate) return 'Listed today';
+  const days = calculateDaysSince(listedDate);
+  if (days === 0) return 'Listed today';
+  if (days === 1) return 'Listed 1 day ago';
+  return `Listed ${days} days ago`;
+}
+
+export function formatDaysAgo(dateStr?: string): string {
+  if (!dateStr) return 'Never contacted';
+  const days = calculateDaysSince(dateStr);
+  if (days === 0) return 'Today';
+  if (days === 1) return '1 day ago';
+  return `${days} days ago`;
+}
+
 export function calculateROI(
   investmentAmount: number,
   additionalExpenses: number,
@@ -81,6 +108,8 @@ export function getStatusTone(status: string): string {
     case 'Active':
     case 'Active Listing':
     case 'High':
+    case 'Collected':
+    case 'Adjusted':
       return 'bg-[#E4EBE0] text-[#064E3B] border-[#A8B9A2]/60';
     case 'Under Negotiation':
     case 'Reserved':
@@ -93,6 +122,7 @@ export function getStatusTone(status: string): string {
     case 'Scheduled':
     case 'Medium':
     case 'Rescheduled':
+    case 'Partially Refunded':
       return 'bg-[#D9AC57]/15 text-[#7A5612] border-[#D9AC57]/40';
     case 'Sold':
     case 'Rented':
@@ -108,6 +138,7 @@ export function getStatusTone(status: string): string {
     case 'Maintenance':
     case 'Rejected':
     case 'Declined':
+    case 'Refunded':
       return 'bg-[#C96C60]/15 text-[#8D382E] border-[#C96C60]/40';
     case 'New':
     case 'On Hold':

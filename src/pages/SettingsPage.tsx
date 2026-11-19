@@ -23,6 +23,7 @@ export const SettingsPage: React.FC = () => {
   );
 
   const [newCategory, setNewCategory] = useState('');
+  const [newLeadSource, setNewLeadSource] = useState('');
   const [userModalOpen, setUserModalOpen] = useState(false);
   const [uName, setUName] = useState('');
   const [uEmail, setUEmail] = useState('');
@@ -457,10 +458,15 @@ export const SettingsPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Property Categories & Lead Status Configuration */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* Property Types, Lead Sources & Lead Pipeline Configuration */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
         <div className="bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl p-5 space-y-3">
-          <h2 className="text-sm font-semibold text-[#20251F]">Property Categories</h2>
+          <div>
+            <h2 className="text-sm font-semibold text-[#20251F]">Property Types</h2>
+            <p className="text-[11px] text-[#77796F]">
+              Physical structure types (separate from Property Category)
+            </p>
+          </div>
           <div className="divide-y divide-[#E5E4DA]">
             {db.settings.propertyCategories.map((cat) => (
               <div
@@ -480,7 +486,7 @@ export const SettingsPage: React.FC = () => {
                                 (c) => c !== cat
                               ),
                           }),
-                        `Removed category ${cat}`
+                        `Removed property type ${cat}`
                       )
                     }
                     className="text-[11px] text-[#C96C60] hover:underline cursor-pointer"
@@ -497,7 +503,7 @@ export const SettingsPage: React.FC = () => {
                 type="text"
                 value={newCategory}
                 onChange={(e) => setNewCategory(e.target.value)}
-                placeholder="Add category..."
+                placeholder="Add property type..."
                 className="flex-1 h-8 px-2.5 text-xs border border-[#E5E4DA] rounded-lg"
               />
               <button
@@ -512,7 +518,7 @@ export const SettingsPage: React.FC = () => {
                           newCategory.trim() as PropertyType,
                         ],
                       }),
-                    'Category added'
+                    'Property type added'
                   );
                   setNewCategory('');
                 }}
@@ -526,9 +532,91 @@ export const SettingsPage: React.FC = () => {
         </div>
 
         <div className="bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl p-5 space-y-3">
-          <h2 className="text-sm font-semibold text-[#20251F]">
-            Lead Pipeline Stages
-          </h2>
+          <div>
+            <h2 className="text-sm font-semibold text-[#20251F]">Lead Sources</h2>
+            <p className="text-[11px] text-[#77796F]">
+              Configurable acquisition channels shown in Lead forms & reports
+            </p>
+          </div>
+          <div className="divide-y divide-[#E5E4DA] max-h-64 overflow-y-auto pr-1">
+            {(db.settings.leadSources || []).map((source) => (
+              <div
+                key={source}
+                className="py-2 flex items-center justify-between text-xs"
+              >
+                <span className="font-medium text-[#20251F]">{source}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono text-[#77796F]">
+                    {db.leads.filter((l) => l.leadSource === source).length}
+                  </span>
+                  {isAdmin && (db.settings.leadSources || []).length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateDb(
+                          (prev) =>
+                            crmService.updateSettings(prev, {
+                              leadSources: prev.settings.leadSources.filter(
+                                (s) => s !== source
+                              ),
+                            }),
+                          `Removed lead source ${source}`
+                        )
+                      }
+                      className="text-[11px] text-[#C96C60] hover:underline cursor-pointer"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {isAdmin && (
+            <div className="flex gap-2 pt-2">
+              <input
+                type="text"
+                value={newLeadSource}
+                onChange={(e) => setNewLeadSource(e.target.value)}
+                placeholder="Add lead source..."
+                className="flex-1 h-8 px-2.5 text-xs border border-[#E5E4DA] rounded-lg"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const clean = newLeadSource.trim();
+                  if (!clean) return;
+                  if ((db.settings.leadSources || []).includes(clean)) {
+                    notify('This lead source already exists.', 'info');
+                    return;
+                  }
+                  updateDb(
+                    (prev) =>
+                      crmService.updateSettings(prev, {
+                        leadSources: [...(prev.settings.leadSources || []), clean],
+                      }),
+                    `Lead source "${clean}" added`
+                  );
+                  setNewLeadSource('');
+                }}
+                className="h-8 px-3 rounded-lg bg-[#064E3B] text-[#FFFFFF] text-xs font-medium flex items-center gap-1 cursor-pointer"
+              >
+                <Plus className="w-3 h-3" />
+                Add
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl p-5 space-y-3">
+          <div>
+            <h2 className="text-sm font-semibold text-[#20251F]">
+              Lead Pipeline Stages
+            </h2>
+            <p className="text-[11px] text-[#77796F]">
+              Buyer qualification progression stages
+            </p>
+          </div>
           <div className="divide-y divide-[#E5E4DA]">
             {db.settings.leadStatuses.map((st, idx) => (
               <div
