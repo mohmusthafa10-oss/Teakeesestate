@@ -57,19 +57,47 @@ def login(
 
 @router.post("/refresh")
 def refresh_token(req: RefreshTokenRequest, db: Session = Depends(get_db)):
+    from app.core.token_registry import token_registry
+
     try:
         payload = decode_token(req.refresh_token)
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=400, detail="Invalid token type")
+
         user_id = payload.get("sub")
+        jti = payload.get("jti")
+        family_id = payload.get("family")
+
+        # Reuse Detection: If token was already revoked, family is compromised!
+        if jti and token_registry.is_token_revoked(jti, family_id):
+            if family_id:
+                token_registry.revoke_family(family_id)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Security Alert: Compromised or reused refresh token. All active sessions in family revoked."
+            )
+
+        # Invalidate current token and rotate
+        if jti:
+            token_registry.revoke_token(jti)
+
         user = db.query(User).filter(User.id == user_id, User.active == True).first()
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
+
         new_access_token = create_access_token(
             subject=user.id,
             extra_claims={"role": user.role, "email": user.email},
         )
-        return {"access_token": new_access_token, "token_type": "bearer"}
+        new_refresh_token = create_refresh_token(subject=user.id, family_id=family_id)
+
+        return {
+            "access_token": new_access_token,
+            "refresh_token": new_refresh_token,
+            "token_type": "bearer"
+        }
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 

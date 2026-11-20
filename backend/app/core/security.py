@@ -52,19 +52,28 @@ def create_access_token(subject: Union[str, Any], extra_claims: Optional[Dict[st
     encoded_jwt = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
-def create_refresh_token(subject: Union[str, Any], expires_delta: Optional[timedelta] = None) -> str:
+def create_refresh_token(subject: Union[str, Any], family_id: Optional[str] = None, expires_delta: Optional[timedelta] = None) -> str:
+    import uuid
+    from app.core.token_registry import token_registry
+
     now = datetime.now(timezone.utc)
     if expires_delta:
         expire = now + expires_delta
     else:
         expire = now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     
+    jti = str(uuid.uuid4())
+    fam_id = family_id or str(uuid.uuid4())
+    
     payload = {
         "sub": str(subject),
         "iat": now,
         "exp": expire,
-        "type": "refresh"
+        "type": "refresh",
+        "jti": jti,
+        "family": fam_id,
     }
+    token_registry.register_token(jti, fam_id)
     encoded_jwt = jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
