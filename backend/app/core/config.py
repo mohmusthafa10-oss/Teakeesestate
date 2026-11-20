@@ -22,6 +22,19 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = "./uploads"
 
+    @field_validator("SECRET_KEY")
+    def validate_production_secret(cls, v: str, info) -> str:
+        # In production, disallow development fallback keys
+        env = os.getenv("ENVIRONMENT", "").lower()
+        if env == "production":
+            if not v or "replace" in v.lower() or "secret-key-2026" in v.lower():
+                raise ValueError(
+                    "FATAL SECURITY CONFIGURATION: In production mode, a cryptographically random SECRET_KEY must be provided in the environment. Development fallback secrets are strictly prohibited."
+                )
+            if len(v) < 32:
+                raise ValueError("SECRET_KEY must be at least 32 characters long in production.")
+        return v
+
     @field_validator("CORS_ORIGINS", mode="before")
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
         if isinstance(v, str):

@@ -3,7 +3,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin
+from app.api.deps import get_current_active_user, require_admin
 from app.database.session import get_db
 from app.models.models import AgencySetting, User
 
@@ -20,7 +20,10 @@ DEFAULT_SETTINGS = {
 }
 
 @router.get("")
-def get_settings(db: Session = Depends(get_db)):
+def get_settings(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     setting = db.query(AgencySetting).filter(AgencySetting.key == "app_settings").first()
     if setting and setting.value:
         try:

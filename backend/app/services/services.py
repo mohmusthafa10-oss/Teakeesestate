@@ -57,24 +57,29 @@ from app.schemas.schemas import (
 )
 
 
+import threading
+
+_sequence_lock = threading.Lock()
+
 def generate_sequential_code(db: Session, prefix: str, pad: int = 3, start: int = 1) -> str:
     """
     Generate thread-safe sequential identifiers like TAK001, SLR-1001, LED-1001, DL-1001.
-    Uses SequenceCounter table with row-level atomic increment.
+    Uses SequenceCounter table with row-level atomic increment and thread lock.
     """
-    counter = db.query(SequenceCounter).filter(SequenceCounter.prefix == prefix).with_for_update().first()
-    if not counter:
-        counter = SequenceCounter(prefix=prefix, current_value=start)
-        db.add(counter)
-        db.flush()
-        num = start
-    else:
-        counter.current_value += 1
-        db.flush()
-        num = counter.current_value
+    with _sequence_lock:
+        counter = db.query(SequenceCounter).filter(SequenceCounter.prefix == prefix).with_for_update().first()
+        if not counter:
+            counter = SequenceCounter(prefix=prefix, current_value=start)
+            db.add(counter)
+            db.commit()
+            num = start
+        else:
+            counter.current_value += 1
+            db.commit()
+            num = counter.current_value
 
     if prefix == "TAK":
-        return f"{prefix}{str(num).padStart(pad, '0') if hasattr(str(num), 'padStart') else str(num).zfill(pad)}"
+        return f"{prefix}{str(num).zfill(pad)}"
     elif prefix in ("SLR", "LED", "DL", "INV", "RNT", "ADV"):
         return f"{prefix}-{str(num).zfill(pad)}"
     return f"{prefix}{str(num).zfill(pad)}"

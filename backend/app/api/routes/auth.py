@@ -1,10 +1,11 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.core.config import settings
+from app.core.rate_limiter import login_limiter
 from app.core.security import create_access_token, create_refresh_token, decode_token, get_password_hash
 from app.database.session import get_db
 from app.models.models import User
@@ -14,14 +15,32 @@ from app.services.services import authenticate_user
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 @router.post("/login", response_model=TokenResponse)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(
+    request: Request,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db)
+):
+    ip_addr = login_limiter.get_client_ip(request)
+    email_key = form_data.username.strip().lower()
+
+    # Rate limit check by client IP and account email
+    login_limiter.check_rate_limit(ip_addr)
+    login_limiter.check_rate_limit(email_key)
+
     user = authenticate_user(db, form_data.username, form_data.password)
     if not user:
+        login_limiter.record_failure(ip_addr)
+        login_limiter.record_failure(email_key)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # Successful login: reset failure counters
+    login_limiter.reset_failures(ip_addr)
+    login_limiter.reset_failures(email_key)
+
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         subject=user.id,
