@@ -1,71 +1,147 @@
-# Real Estate CRM
+# Teakees Real Estate CRM — Production Architecture & Deployment Guide
 
-A centralized, interactive Real Estate CRM web application designed to replace scattered spreadsheets for agencies managing sellers, properties, buyer leads, matching, running properties, follow-ups, deals, investments, and managed rentals.
+## 1. System Overview
 
-> **Configurable Branding:** The agency name, tagline, currency symbol, commission defaults, property categories, and lead pipeline stages can all be customized live from **Settings** without modifying source code.
-
----
-
-## Key Capabilities
-
-- **Executive Dashboard**: Live metrics derived from relational CRM state (Total/Running/Available Properties, Leads, Sellers, Today's & Overdue Follow-ups, Active Deals), Sales & Commission overview, pipeline chart, clickable status breakdowns, upcoming site visits, and recent activity logs.
-- **Properties & Combined Seller + Property Registration**:
-  - Searchable central property database with **Table**, **Card**, and interactive **Map** views, multi-filters, sorting, and pagination.
-  - Streamlined **Add Seller + Property** workflow supporting both new seller onboarding and attaching listings to existing sellers, with rich multiline descriptions, multi-image uploads, and document references.
-  - Dedicated **Property Profile** page linking photos, documents, seller profile, site visits, follow-up history, deal history, and interested leads.
-- **Sellers Management**: One-to-many owner directory (`Seller → Properties`), multi-property owner portfolio view, follow-up history, and seller document tracking.
-- **Independent Leads & Buyer ↔ Property Matching**:
-  - Register buyer leads independently without requiring a property up front.
-  - Track leads across `New → Contacted → Qualified → Property Shared → Site Visit → Negotiation → Converted / Lost / On Hold`.
-  - Many-to-many **Matching Engine** (`Find Matching Properties` / `Find Matching Leads`) explaining concrete matching reasons across location, budget, property type, area, and requirement keywords.
-- **Running Properties**: Real-time operational view over central property records separating **Active Listings** from **Managed / Operating** properties.
-- **Follow-ups & Calendar**: Organized across Today, Overdue, Upcoming, and Completed views with an interactive monthly calendar and chained completion + next-follow-up scheduling.
-- **Deals & Sales**: Full transaction pipeline with automatic commission calculation, duplicate-sale guards, and automatic updates to property status (`Sold` / `Rented`) and lead status (`Converted`) on deal closure.
-- **Investments & ROI**: Tracks capital deployed, additional expenses, expected vs. actual returns, and automatic ROI calculation (`(Net Profit / Total Investment) × 100`).
-- **Stay & Rentals**: Daily stay and monthly/yearly lease operations covering check-ins, check-outs, deposits, contracts, rental income, maintenance expenses, and tenant records.
-- **Reports & Exports**: 14 live analytical reports with date-range filtering, Excel (`.xls`) download, and print-ready PDF export.
-- **Team & Role-Based Access Control (RBAC)**: Admin and Agent user management with live session switching to scope agent access to assigned records.
-- **Infinity Symbol Preloader & Global Search**: Animated SVG infinity (`∞`) loader for initial hydration, page transitions, and exports, paired with `⌘K` / global search across all records.
+A centralized, enterprise-grade Real Estate CRM developed to replace scattered Google Sheets. The system preserves the original React 19 frontend design system (`#064E3B`, `#F1F0E8`, `#FFFFFF`, `#151D18`, infinity-preloader) and provides a Python FastAPI backend with PostgreSQL persistence, JWT authentication, Argon2 password hashing, and role-based access control.
 
 ---
 
-## Tech Stack
+## 2. Directory Architecture
 
-- **Frontend**: React 19, TypeScript, Tailwind CSS v4
-- **Icons**: Lucide React
-- **Build & Tooling**: Vite 8, `tsx`, TypeScript (`tsc --noEmit`)
-- **Persistence**: Clean relational service layer (`src/services/crmService.ts`) backed by `localStorage` with realistic seeded data (`src/data/seedData.ts`), structured so a REST/database backend can be connected without rebuilding UI components.
-
----
-
-## Project Structure
-
-```text
-src/
-├── assets/images/        # Local property photography assets
-├── components/common/    # Sidebar, TopNav, InfinityPreloader, Modal, Pagination, UI primitives
-├── context/              # CRMContext (routing, role scoping, notifications, state sync)
-├── data/                 # Realistic seeded CRM dataset
-├── pages/                # All 15 CRM routes and profile detail pages
-├── services/             # Relational data & business logic layer (crmService.ts)
-├── types/                # TypeScript domain interfaces for all 16 CRM entities
-└── utils/                # Currency/date/ROI formatters and Buyer-Property matching engine
+```
+Teakeesestate/
+├── backend/
+│   ├── app/
+│   │   ├── api/
+│   │   │   ├── deps.py               # Dependency injection (JWT bearer, RBAC permissions)
+│   │   │   └── routes/               # REST API endpoints
+│   │   │       ├── auth.py           # Login, token refresh, logout, profile
+│   │   │       ├── sellers.py        # Seller CRUD & portfolio linkage
+│   │   │       ├── properties.py     # Property inventory, map query, price history
+│   │   │       ├── registration.py   # Atomic combined Seller + Property registration
+│   │   │       ├── leads.py          # Independent buyer lead management & matching
+│   │   │       ├── matches.py        # Lead-property association & interest tracking
+│   │   │       ├── followups.py      # Scheduled tasks & contact activity recording
+│   │   │       ├── site_visits.py    # Site visit scheduling & outcomes
+│   │   │       ├── deals.py          # Sales pipeline & duplicate transaction guard
+│   │   │       ├── finance.py        # Seller advance liability ledger & investments
+│   │   │       ├── rentals.py        # Short-term stay and long-term rental operations
+│   │   │       ├── dashboard.py      # Relational metrics & activity feeds
+│   │   │       ├── reports.py        # Analytical reports (inventory, leads, sales)
+│   │   │       ├── users.py          # Admin user management
+│   │   │       ├── settings.py       # Configurable branding & taxonomy
+│   │   │       └── uploads.py        # File and photo upload handler
+│   │   ├── core/
+│   │   │   ├── config.py             # Pydantic BaseSettings (.env loading)
+│   │   │   ├── security.py           # Argon2 hashing & JWT tokens
+│   │   │   └── permissions.py        # RBAC role permissions matrix
+│   │   ├── database/
+│   │   │   ├── base.py               # DeclarativeBase & TimestampMixin
+│   │   │   └── session.py            # PostgreSQL & SQLite session factory
+│   │   ├── models/
+│   │   │   └── models.py             # 20 Relational ORM models with B-tree indexes
+│   │   ├── schemas/
+│   │   │   └── schemas.py            # Pydantic v2 validation models
+│   │   ├── services/
+│   │   │   └── services.py           # ACID business logic, sequential IDs, matching
+│   │   ├── main.py                   # FastAPI entrypoint, CORS, static routes
+│   │   └── seed.py                   # Idempotent demo dataset seeder
+│   ├── migrations/                   # Alembic version-controlled DDL migrations
+│   ├── tests/                        # Automated Pytest suite
+│   ├── Dockerfile                    # Containerization specification
+│   ├── requirements.txt              # Pinned Python dependencies
+│   ├── alembic.ini                   # Migration config
+│   └── .env.example                  # Environment configuration template
+├── src/
+│   ├── services/
+│   │   ├── apiClient.ts              # Authenticated REST client with auto-refresh
+│   │   └── crmService.ts             # Client data abstraction
+│   ├── components/map/               # Leaflet portfolio map & location picker
+│   └── ...                           # Preserved React 19 pages and components
+├── docker-compose.yml                # Production PostgreSQL & backend orchestrator
+└── README.md
 ```
 
 ---
 
-## Getting Started
+## 3. Quick Start & Local Execution
+
+### Backend Setup
 
 ```bash
-# Install dependencies
-npm install
+# 1. Enter backend directory
+cd backend
 
-# Start development server (http://localhost:3000)
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Initialize SQLite database with seed data
+python app/seed.py
+
+# 4. Start FastAPI development server
+uvicorn app.main:app --reload --port 8000
+```
+API Documentation will be live at: `http://localhost:8000/docs`
+
+### Frontend Setup
+
+```bash
+# In the project root
+npm install --legacy-peer-deps
 npm run dev
+```
+Application interface will run on: `http://localhost:3000`
 
-# Type-check with TypeScript
-npm run lint
+---
 
-# Build for production
-npm run build
+## 4. Default Seed Credentials
+
+| Role | Email | Password | Access Scope |
+| :--- | :--- | :--- | :--- |
+| **Admin** | `admin@verdantrealty.in` | `admin123` | Full access across all records, finance, users, and settings |
+| **Agent** | `meera@verdantrealty.in` | `agent123` | Scoped to assigned records, follow-ups, properties, and leads |
+
+---
+
+## 5. Running Automated Tests
+
+Execute the comprehensive test suite verifying authentication, RBAC, combined registration, sequential ID generation, and transaction rollback:
+
+```bash
+python -m pytest backend/tests -v
+```
+
+All 11 automated test cases pass out of the box.
+
+---
+
+## 6. PostgreSQL Production Deployment with Docker Compose
+
+To spin up a fully isolated PostgreSQL 16 server and the FastAPI backend:
+
+```bash
+# Start PostgreSQL and Backend services
+docker-compose up -d --build
+
+# Run database migrations
+docker-compose exec backend alembic upgrade head
+
+# Seed initial production dataset
+docker-compose exec backend python app/seed.py
+```
+
+---
+
+## 7. Database Backup and Restore Procedures
+
+### PostgreSQL Backup
+```bash
+docker exec -t teakees_postgres pg_dump -U postgres -d teakees_crm -F c -b -v -f /tmp/teakees_backup.dump
+docker cp teakees_postgres:/tmp/teakees_backup.dump ./teakees_backup_$(date +%Y%m%d).dump
+```
+
+### PostgreSQL Restore
+```bash
+docker cp ./teakees_backup.dump teakees_postgres:/tmp/teakees_backup.dump
+docker exec -t teakees_postgres pg_restore -U postgres -d teakees_crm -v --clean /tmp/teakees_backup.dump
 ```
