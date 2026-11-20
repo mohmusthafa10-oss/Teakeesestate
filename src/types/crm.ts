@@ -451,6 +451,8 @@ export interface CRMDatabase {
 }
 
 export type RoutePage =
+  | 'login'
+  | 'profile'
   | 'dashboard'
   | 'properties'
   | 'property-detail'

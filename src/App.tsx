@@ -16,6 +16,8 @@ import { FollowUpsPage } from './pages/FollowUpsPage';
 import { InvestmentsPage } from './pages/InvestmentsPage';
 import { LeadProfilePage } from './pages/LeadProfilePage';
 import { LeadsPage } from './pages/LeadsPage';
+import { LoginPage } from './pages/LoginPage';
+import { ProfilePage } from './pages/ProfilePage';
 import { PropertiesPage } from './pages/PropertiesPage';
 import { PropertyProfilePage } from './pages/PropertyProfilePage';
 import { RentalsPage } from './pages/RentalsPage';
@@ -26,13 +28,26 @@ import { SellersPage } from './pages/SellersPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 const CRMWorkspace: React.FC = () => {
-  const { route, isLoading } = useCRM();
+  const { route, isLoading, isAuthenticated } = useCRM();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // If unauthenticated or explicitly on login page, display pure Login view
+  if (!isAuthenticated || route.page === 'login') {
+    return (
+      <div className="min-h-screen bg-[#F1F0E8] text-[#20251F]">
+        <InfinityPreloader visible={isLoading} />
+        <LoginPage />
+        <ToastStack />
+      </div>
+    );
+  }
 
   const renderPage = () => {
     switch (route.page) {
       case 'dashboard':
         return <DashboardPage />;
+      case 'profile':
+        return <ProfilePage />;
       case 'properties':
         return <PropertiesPage />;
       case 'property-detail':

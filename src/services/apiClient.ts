@@ -123,6 +123,13 @@ class ApiClient {
     return this.request<User>('/api/auth/me');
   }
 
+  async updateProfile(data: { name?: string; phone?: string; designation?: string; password?: string }): Promise<User> {
+    return this.request<User>('/api/auth/profile', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
   // ==================== DASHBOARD ====================
   async getDashboardSummary(): Promise<any> {
     return this.request('/api/dashboard/summary');

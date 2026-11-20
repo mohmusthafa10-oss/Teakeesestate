@@ -98,8 +98,8 @@ Application interface will run on: `http://localhost:3000`
 
 | Role | Email | Password | Access Scope |
 | :--- | :--- | :--- | :--- |
-| **Admin** | `admin@verdantrealty.in` | `admin123` | Full access across all records, finance, users, and settings |
-| **Agent** | `meera@verdantrealty.in` | `agent123` | Scoped to assigned records, follow-ups, properties, and leads |
+| **Admin** | `admin@testate.in` | `admin123` | Full access across all records, finance, users, and settings |
+| **Agent** | `meera@testate.in` | `agent123` | Scoped to assigned records, follow-ups, properties, and leads |
 
 ---
 

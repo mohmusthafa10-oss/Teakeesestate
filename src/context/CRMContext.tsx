@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { crmService } from '../services/crmService';
+import { apiClient } from '../services/apiClient';
 import { CRMDatabase, RoutePage, User } from '../types/crm';
 
 export interface RouteState {
@@ -21,9 +22,12 @@ export interface ToastMessage {
 interface CRMContextValue {
   db: CRMDatabase;
   currentUser: User;
+  isAuthenticated: boolean;
   isAdmin: boolean;
   route: RouteState;
   navigate: (next: RouteState, options?: { showLoader?: boolean }) => void;
+  login: (username: string, password: string) => Promise<void>;
+  logout: () => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
   withLoader: <T>(fn: () => Promise<T> | T, delayMs?: number) => Promise<T>;
@@ -42,28 +46,31 @@ interface CRMContextValue {
 
 const CRMContext = createContext<CRMContextValue | null>(null);
 
+const VALID_PAGES: RoutePage[] = [
+  'login',
+  'profile',
+  'dashboard',
+  'properties',
+  'property-detail',
+  'register-property',
+  'leads',
+  'lead-detail',
+  'sellers',
+  'seller-detail',
+  'running-properties',
+  'follow-ups',
+  'deals',
+  'investments',
+  'rentals',
+  'reports',
+  'settings',
+];
+
 function parseHashToRoute(): RouteState {
   const raw = window.location.hash.replace(/^#\/?/, '');
   if (!raw) return { page: 'dashboard' };
   const [segment, id] = raw.split('/');
-  const validPages: RoutePage[] = [
-    'dashboard',
-    'properties',
-    'property-detail',
-    'register-property',
-    'leads',
-    'lead-detail',
-    'sellers',
-    'seller-detail',
-    'running-properties',
-    'follow-ups',
-    'deals',
-    'investments',
-    'rentals',
-    'reports',
-    'settings',
-  ];
-  if (validPages.includes(segment as RoutePage)) {
+  if (VALID_PAGES.includes(segment as RoutePage)) {
     return { page: segment as RoutePage, id };
   }
   return { page: 'dashboard' };
@@ -74,28 +81,8 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [route, setRoute] = useState<RouteState>(() => parseHashToRoute());
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-
-  // Initial app hydration preloader
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setIsLoading(false);
-    }, 650);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  // Sync document title with configurable agency name
-  useEffect(() => {
-    document.title = `${db.settings.agencyName} — Real Estate CRM`;
-  }, [db.settings.agencyName]);
-
-  // Listen to browser hash back/forward
-  useEffect(() => {
-    const handleHashChange = () => {
-      setRoute(parseHashToRoute());
-    };
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!localStorage.getItem('crm_access_token'));
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -132,6 +119,88 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     },
     []
   );
+
+  // Authenticate & restore session on initial mount
+  useEffect(() => {
+    let isMounted = true;
+    const initAuth = async () => {
+      const token = localStorage.getItem('crm_access_token');
+      if (!token) {
+        if (isMounted) {
+          setIsAuthenticated(false);
+          setAuthUser(null);
+          setIsLoading(false);
+          if (window.location.hash !== '#/login') {
+            navigate({ page: 'login' });
+          }
+        }
+        return;
+      }
+
+      try {
+        const user = await apiClient.getMe();
+        if (isMounted) {
+          setAuthUser(user);
+          setIsAuthenticated(true);
+          setIsLoading(false);
+          if (parseHashToRoute().page === 'login') {
+            navigate({ page: 'dashboard' });
+          }
+        }
+      } catch (err) {
+        apiClient.logout();
+        if (isMounted) {
+          setIsAuthenticated(false);
+          setAuthUser(null);
+          setIsLoading(false);
+          navigate({ page: 'login' });
+        }
+      }
+    };
+
+    initAuth();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Sync document title with configurable agency name
+  useEffect(() => {
+    document.title = `${db.settings.agencyName} — Real Estate CRM`;
+  }, [db.settings.agencyName]);
+
+  // Listen to browser hash back/forward
+  useEffect(() => {
+    const handleHashChange = () => {
+      const parsed = parseHashToRoute();
+      if (!localStorage.getItem('crm_access_token') && parsed.page !== 'login') {
+        navigate({ page: 'login' });
+      } else {
+        setRoute(parsed);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, [navigate]);
+
+  const login = useCallback(
+    async (username: string, password: string) => {
+      const res = await apiClient.login(username, password);
+      setAuthUser(res.user);
+      setIsAuthenticated(true);
+      notify(`Welcome back, ${res.user.name}!`, 'success');
+      navigate({ page: 'dashboard' }, { showLoader: true });
+    },
+    [navigate, notify]
+  );
+
+  const logout = useCallback(() => {
+    apiClient.logout();
+    setIsAuthenticated(false);
+    setAuthUser(null);
+    notify('You have been signed out.', 'info');
+    navigate({ page: 'login' });
+  }, [navigate, notify]);
 
   const withLoader = useCallback(
     async <T,>(fn: () => Promise<T> | T, delayMs = 340): Promise<T> => {
@@ -172,12 +241,16 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 500);
   }, [notify]);
 
-  const currentUser = useMemo(() => {
+  // Current user is either the authenticated user from backend or fallback to db user
+  const currentUser: User = useMemo(() => {
+    if (authUser) {
+      return authUser;
+    }
     return (
       db.users.find((u) => u.id === db.settings.currentUserId) ||
       db.users[0]
     );
-  }, [db.users, db.settings.currentUserId]);
+  }, [authUser, db.users, db.settings.currentUserId]);
 
   const isAdmin = currentUser?.role === 'Admin';
 
@@ -225,9 +298,12 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const value: CRMContextValue = {
     db,
     currentUser,
+    isAuthenticated,
     isAdmin,
     route,
     navigate,
+    login,
+    logout,
     isLoading,
     setIsLoading,
     withLoader,

@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
             admin_user = User(
                 id="usr-1",
                 name="Arjun Menon",
-                email="admin@verdantrealty.in",
+                email="admin@testate.in",
                 phone="+91 98470 11220",
                 password_hash=get_password_hash("admin123"),
                 role="Admin",
@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
             agent_user = User(
                 id="usr-2",
                 name="Meera Nair",
-                email="meera@verdantrealty.in",
+                email="meera@testate.in",
                 phone="+91 98471 33445",
                 password_hash=get_password_hash("agent123"),
                 role="Agent",

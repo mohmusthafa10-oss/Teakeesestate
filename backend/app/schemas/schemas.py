@@ -50,6 +50,12 @@ class UserUpdate(BaseModel):
     active: Optional[bool] = None
     password: Optional[str] = None
 
+class ProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    phone: Optional[str] = None
+    designation: Optional[str] = None
+    password: Optional[str] = None
+
 class UserResponse(UserBase):
     id: str
     created_at: datetime

@@ -5,10 +5,10 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user
 from app.core.config import settings
-from app.core.security import create_access_token, create_refresh_token, decode_token
+from app.core.security import create_access_token, create_refresh_token, decode_token, get_password_hash
 from app.database.session import get_db
 from app.models.models import User
-from app.schemas.schemas import RefreshTokenRequest, TokenResponse, UserResponse
+from app.schemas.schemas import ChangePasswordRequest, ProfileUpdate, RefreshTokenRequest, TokenResponse, UserResponse
 from app.services.services import authenticate_user
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -56,6 +56,24 @@ def refresh_token(req: RefreshTokenRequest, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserResponse)
 def get_current_user_profile(current_user: User = Depends(get_current_active_user)):
+    return current_user
+
+@router.put("/profile", response_model=UserResponse)
+def update_current_user_profile(
+    req: ProfileUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    if req.name is not None:
+        current_user.name = req.name
+    if req.phone is not None:
+        current_user.phone = req.phone
+    if req.designation is not None:
+        current_user.designation = req.designation
+    if req.password:
+        current_user.password_hash = get_password_hash(req.password)
+    db.commit()
+    db.refresh(current_user)
     return current_user
 
 @router.post("/logout")

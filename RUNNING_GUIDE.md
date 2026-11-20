@@ -49,10 +49,10 @@ The system comes pre-seeded with realistic data matching agency workflows:
 
 | Role | Email | Password | Access & Responsibilities |
 | :--- | :--- | :--- | :--- |
-| **Admin** | `admin@verdantrealty.in` | `admin123` | Full access across all properties, sellers, leads, financial records, users, and agency settings. |
-| **Agent** | `meera@verdantrealty.in` | `agent123` | Scoped to assigned records, listings, scheduled follow-ups, and site visits. |
-| **Agent** | `karthik@verdantrealty.in` | `agent123` | Land & Agricultural investment specialist. |
-| **Agent** | `sana@verdantrealty.in` | `agent123` | Rentals and coastal stays coordinator. |
+| **Admin** | `admin@testate.in` | `admin123` | Full access across all properties, sellers, leads, financial records, users, and agency settings. |
+| **Agent** | `meera@testate.in` | `agent123` | Scoped to assigned records, listings, scheduled follow-ups, and site visits. |
+| **Agent** | `karthik@testate.in` | `agent123` | Land & Agricultural investment specialist. |
+| **Agent** | `sana@testate.in` | `agent123` | Rentals and coastal stays coordinator. |
 
 ---
 
