@@ -90,7 +90,7 @@ class SellerUpdate(BaseModel):
 class SellerResponse(SellerBase):
     id: str
     code: str
-    last_contacted_date: Optional[str] = None
+    last_contacted_date: Optional[Any] = None
     last_contact_method: Optional[str] = None
     last_conversation_notes: Optional[str] = None
     created_at: datetime
@@ -315,7 +315,7 @@ class LeadBase(BaseModel):
     requirement_description: Optional[str] = ""
     status: str = "New"
     assigned_agent_id: Optional[str] = None
-    next_follow_up_date: Optional[str] = None
+    next_follow_up_date: Optional[Any] = None
     notes: Optional[str] = ""
     conversion_details: Optional[str] = None
 
@@ -338,7 +338,7 @@ class LeadUpdate(BaseModel):
     requirement_description: Optional[str] = None
     status: Optional[str] = None
     assigned_agent_id: Optional[str] = None
-    next_follow_up_date: Optional[str] = None
+    next_follow_up_date: Optional[Any] = None
     last_contacted_date: Optional[str] = None
     last_contact_method: Optional[str] = None
     last_conversation_notes: Optional[str] = None
@@ -348,7 +348,7 @@ class LeadUpdate(BaseModel):
 class LeadResponse(LeadBase):
     id: str
     code: str
-    last_contacted_date: Optional[str] = None
+    last_contacted_date: Optional[Any] = None
     last_contact_method: Optional[str] = None
     last_conversation_notes: Optional[str] = None
     created_at: datetime
