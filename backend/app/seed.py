@@ -37,7 +37,7 @@ def run_seed():
 
     try:
         # Check if users already seeded
-        existing_user = db.query(User).filter(User.email == "arjun@testate.in").first()
+        existing_user = db.query(User).filter(User.email == "admin@testate.in").first()
         if existing_user:
             print("Database already contains seed data. Skipping seed.")
             return
@@ -46,8 +46,8 @@ def run_seed():
         users = [
             User(
                 id="usr-1",
-                name="Arjun Menon",
-                email="arjun@testate.in",
+                name="Admin User",
+                email="admin@testate.in",
                 phone="+91 98470 11220",
                 password_hash=get_password_hash("admin123"),
                 role="Admin",
@@ -57,7 +57,7 @@ def run_seed():
             User(
                 id="usr-2",
                 name="Meera Nair",
-                email="meera@testate.in",
+                email="agent1@testate.in",
                 phone="+91 98471 33445",
                 password_hash=get_password_hash("agent123"),
                 role="Agent",
@@ -67,7 +67,7 @@ def run_seed():
             User(
                 id="usr-3",
                 name="Karthik Varma",
-                email="karthik@testate.in",
+                email="agent2@testate.in",
                 phone="+91 97450 88991",
                 password_hash=get_password_hash("agent123"),
                 role="Agent",
@@ -77,7 +77,7 @@ def run_seed():
             User(
                 id="usr-4",
                 name="Sana Fathima",
-                email="sana@testate.in",
+                email="agent3@testate.in",
                 phone="+91 94460 55219",
                 password_hash=get_password_hash("agent123"),
                 role="Agent",

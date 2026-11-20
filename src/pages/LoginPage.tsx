@@ -176,8 +176,8 @@ export const LoginPage: React.FC = () => {
         <div className="mt-6 p-4 rounded-xl bg-[#FFFFFF]/70 border border-[#E5E4DA] text-center text-xs text-[#77796F]">
           <p className="font-semibold text-[#20251F] mb-1">Company Staff Credentials</p>
           <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px]">
-            <span>Admin: <strong className="text-[#064E3B]">arjun@testate.in</strong> (admin123)</span>
-            <span>Agent: <strong className="text-[#064E3B]">meera@testate.in</strong> (agent123)</span>
+            <span>Admin: <strong className="text-[#064E3B]">admin@testate.in</strong> (admin123)</span>
+            <span>Agent: <strong className="text-[#064E3B]">agent1@testate.in</strong> (agent123)</span>
           </div>
         </div>
       </div>

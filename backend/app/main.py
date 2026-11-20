@@ -57,7 +57,7 @@ async def lifespan(app: FastAPI):
             agent_user = User(
                 id="usr-2",
                 name="Meera Nair",
-                email="meera@testate.in",
+                email="agent1@testate.in",
                 phone="+91 98471 33445",
                 password_hash=get_password_hash("agent123"),
                 role="Agent",
