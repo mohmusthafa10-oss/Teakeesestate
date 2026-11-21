@@ -14,7 +14,8 @@ import {
   User,
 } from '../types/crm';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const rawBase = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
+const API_BASE = (rawBase || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' ? '' : 'http://localhost:8000')).replace(/\/+$/, '');
 const TOKEN_KEY = 'crm_access_token';
 const REFRESH_KEY = 'crm_refresh_token';
 

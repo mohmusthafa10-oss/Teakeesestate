@@ -89,11 +89,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS Middleware
+# CORS Middleware - Permissive configuration for hosted & local environments
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permits local frontend dev origins
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
