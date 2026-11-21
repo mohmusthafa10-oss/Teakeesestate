@@ -4,13 +4,19 @@ import { useCRM } from '../context/CRMContext';
 import { InfinityPreloader } from '../components/common/InfinityPreloader';
 
 export const LoginPage: React.FC = () => {
-  const { login, db } = useCRM();
+  const { login, db, isAuthenticated, navigate } = useCRM();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    if (isAuthenticated) {
+      navigate({ page: 'dashboard' });
+    }
+  }, [isAuthenticated, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

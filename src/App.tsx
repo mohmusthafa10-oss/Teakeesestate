@@ -31,8 +31,8 @@ const CRMWorkspace: React.FC = () => {
   const { route, isLoading, isAuthenticated } = useCRM();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  // If unauthenticated or explicitly on login page, display pure Login view
-  if (!isAuthenticated || route.page === 'login') {
+  // If unauthenticated, display pure Login view
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-[#F1F0E8] text-[#20251F]">
         <InfinityPreloader visible={isLoading} />
@@ -44,6 +44,7 @@ const CRMWorkspace: React.FC = () => {
 
   const renderPage = () => {
     switch (route.page) {
+      case 'login':
       case 'dashboard':
         return <DashboardPage />;
       case 'profile':

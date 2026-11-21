@@ -15,7 +15,8 @@ import {
 } from '../types/crm';
 
 const rawBase = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
-const API_BASE = (rawBase || (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' ? '' : 'http://localhost:8000')).replace(/\/+$/, '');
+const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+const API_BASE = (rawBase || (isLocal ? 'http://localhost:8000' : 'https://teakeesestate.onrender.com')).replace(/\/+$/, '');
 const TOKEN_KEY = 'crm_access_token';
 const REFRESH_KEY = 'crm_refresh_token';
 
