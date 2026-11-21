@@ -1,147 +1,96 @@
-# Teakees Real Estate CRM — Production Architecture & Deployment Guide
+# Teakees Real Estate CRM
 
-## 1. System Overview
+## Overview
 
-A centralized, enterprise-grade Real Estate CRM developed to replace scattered Google Sheets. The system preserves the original React 19 frontend design system (`#064E3B`, `#F1F0E8`, `#FFFFFF`, `#151D18`, infinity-preloader) and provides a Python FastAPI backend with PostgreSQL persistence, JWT authentication, Argon2 password hashing, and role-based access control.
+A full‑stack Real Estate CRM built with **FastAPI**, **SQLAlchemy**, **Pydantic v2**, and a **React 19 + Vite** frontend. The backend uses PostgreSQL in production and SQLite for local development.
 
----
-
-## 2. Directory Architecture
-
+## Project Structure
 ```
-Teakeesestate/
-├── backend/
-│   ├── app/
-│   │   ├── api/
-│   │   │   ├── deps.py               # Dependency injection (JWT bearer, RBAC permissions)
-│   │   │   └── routes/               # REST API endpoints
-│   │   │       ├── auth.py           # Login, token refresh, logout, profile
-│   │   │       ├── sellers.py        # Seller CRUD & portfolio linkage
-│   │   │       ├── properties.py     # Property inventory, map query, price history
-│   │   │       ├── registration.py   # Atomic combined Seller + Property registration
-│   │   │       ├── leads.py          # Independent buyer lead management & matching
-│   │   │       ├── matches.py        # Lead-property association & interest tracking
-│   │   │       ├── followups.py      # Scheduled tasks & contact activity recording
-│   │   │       ├── site_visits.py    # Site visit scheduling & outcomes
-│   │   │       ├── deals.py          # Sales pipeline & duplicate transaction guard
-│   │   │       ├── finance.py        # Seller advance liability ledger & investments
-│   │   │       ├── rentals.py        # Short-term stay and long-term rental operations
-│   │   │       ├── dashboard.py      # Relational metrics & activity feeds
-│   │   │       ├── reports.py        # Analytical reports (inventory, leads, sales)
-│   │   │       ├── users.py          # Admin user management
-│   │   │       ├── settings.py       # Configurable branding & taxonomy
-│   │   │       └── uploads.py        # File and photo upload handler
-│   │   ├── core/
-│   │   │   ├── config.py             # Pydantic BaseSettings (.env loading)
-│   │   │   ├── security.py           # Argon2 hashing & JWT tokens
-│   │   │   └── permissions.py        # RBAC role permissions matrix
-│   │   ├── database/
-│   │   │   ├── base.py               # DeclarativeBase & TimestampMixin
-│   │   │   └── session.py            # PostgreSQL & SQLite session factory
-│   │   ├── models/
-│   │   │   └── models.py             # 20 Relational ORM models with B-tree indexes
-│   │   ├── schemas/
-│   │   │   └── schemas.py            # Pydantic v2 validation models
-│   │   ├── services/
-│   │   │   └── services.py           # ACID business logic, sequential IDs, matching
-│   │   ├── main.py                   # FastAPI entrypoint, CORS, static routes
-│   │   └── seed.py                   # Idempotent demo dataset seeder
-│   ├── migrations/                   # Alembic version-controlled DDL migrations
-│   ├── tests/                        # Automated Pytest suite
-│   ├── Dockerfile                    # Containerization specification
-│   ├── requirements.txt              # Pinned Python dependencies
-│   ├── alembic.ini                   # Migration config
-│   └── .env.example                  # Environment configuration template
-├── src/
-│   ├── services/
-│   │   ├── apiClient.ts              # Authenticated REST client with auto-refresh
-│   │   └── crmService.ts             # Client data abstraction
-│   ├── components/map/               # Leaflet portfolio map & location picker
-│   └── ...                           # Preserved React 19 pages and components
-├── docker-compose.yml                # Production PostgreSQL & backend orchestrator
-└── README.md
+├── backend/                # FastAPI backend
+│   ├── app/                # Application code
+│   ├── migrations/         # Alembic migrations
+│   ├── .env.example        # Example env vars (PostgreSQL URL example)
+│   └── requirements.txt    # Python dependencies
+├── src/                    # React 19 frontend (Vite)
+│   ├── pages/              # UI pages
+│   └── ...
+├── .gitignore
+├── package.json            # Frontend dependencies
+└── README.md               # This file
 ```
 
----
+## Quick Start (Local Development)
 
-## 3. Quick Start & Local Execution
+### Backend
+1. Navigate to the backend directory:
+   ```bash
+   cd backend
+   ```
+2. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. (Optional) Seed SQLite database for dev:
+   ```bash
+   python app/seed.py
+   ```
+4. Run the FastAPI server:
+   ```bash
+   uvicorn app.main:app --reload --port 8000
+   ```
+   API docs: `http://localhost:8000/docs`
 
-### Backend Setup
+### Frontend
+1. Install Node dependencies (from project root):
+   ```bash
+   npm install --legacy-peer-deps
+   ```
+2. Start the Vite dev server:
+   ```bash
+   npm run dev
+   ```
+   UI: `http://localhost:3000`
 
-```bash
-# 1. Enter backend directory
-cd backend
+## Default Seed Credentials
+| Role | Email | Password |
+|------|-------|----------|
+| **Admin** | `admin@testate.in` | `admin123` |
+| **Agent** | `agent1@testate.in` | `agent123` |
 
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Initialize SQLite database with seed data
-python app/seed.py
-
-# 4. Start FastAPI development server
-uvicorn app.main:app --reload --port 8000
-```
-API Documentation will be live at: `http://localhost:8000/docs`
-
-### Frontend Setup
-
-```bash
-# In the project root
-npm install --legacy-peer-deps
-npm run dev
-```
-Application interface will run on: `http://localhost:3000`
-
----
-
-## 4. Default Seed Credentials
-
-| Role | Email | Password | Access Scope |
-| :--- | :--- | :--- | :--- |
-| **Admin** | `admin@testate.in` | `admin123` | Full access across all records, finance, users, and settings |
-| **Agent** | `agent1@testate.in` | `agent123` | Scoped to assigned records, follow-ups, properties, and leads |
-
----
-
-## 5. Running Automated Tests
-
-Execute the comprehensive test suite verifying authentication, RBAC, combined registration, sequential ID generation, and transaction rollback:
-
+## Running Automated Tests
 ```bash
 python -m pytest backend/tests -v
 ```
-
-All 11 automated test cases pass out of the box.
-
----
-
-## 6. PostgreSQL Production Deployment with Docker Compose
-
-To spin up a fully isolated PostgreSQL 16 server and the FastAPI backend:
-
-```bash
-# Start PostgreSQL and Backend services
-docker-compose up -d --build
-
-# Run database migrations
-docker-compose exec backend alembic upgrade head
-
-# Seed initial production dataset
-docker-compose exec backend python app/seed.py
-```
+All tests should pass.
 
 ---
 
-## 7. Database Backup and Restore Procedures
+## Render Deployment (Production)
 
-### PostgreSQL Backup
-```bash
-docker exec -t teakees_postgres pg_dump -U postgres -d teakees_crm -F c -b -v -f /tmp/teakees_backup.dump
-docker cp teakees_postgres:/tmp/teakees_backup.dump ./teakees_backup_$(date +%Y%m%d).dump
-```
+### Backend (FastAPI)
+- **Build command:** `pip install -r requirements.txt`
+- **Start command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- **Environment variables:** set in Render UI:
+  - `PROJECT_NAME="Teakees Real Estate CRM"`
+  - `ENVIRONMENT="production"`
+  - `SECRET_KEY` (secure random string)
+  - `ALGORITHM="HS256"`
+  - `ACCESS_TOKEN_EXPIRE_MINUTES=120`
+  - `REFRESH_TOKEN_EXPIRE_DAYS=7`
+  - `DATABASE_URL` – PostgreSQL URL supplied by Render PostgreSQL add‑on, e.g. `postgresql+psycopg2://user:pass@host:5432/dbname`
+  - `CORS_ORIGINS` – your frontend URL, e.g. `https://my-frontend.onrender.com`
+  - `UPLOAD_DIR=/app/uploads`
+- **Post‑deploy script:** `alembic upgrade head`
+- **Health‑check endpoint:** `GET /api/health` returns `{ "status": "ok" }`
 
-### PostgreSQL Restore
-```bash
-docker cp ./teakees_backup.dump teakees_postgres:/tmp/teakees_backup.dump
-docker exec -t teakees_postgres pg_restore -U postgres -d teakees_crm -v --clean /tmp/teakees_backup.dump
-```
+### Frontend (React 19 + Vite)
+- **Build command:** `npm install --legacy-peer-deps && npm run build`
+- **Publish directory:** `dist/`
+- **Environment variable:** `VITE_API_URL` pointing to the backend URL (e.g. `https://my-backend.onrender.com`).
+
+Render will automatically provision a PostgreSQL instance; backups can be managed via Render's built‑in backup features.
+
+---
+
+## License
+MIT License

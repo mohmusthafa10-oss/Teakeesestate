@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Generic, List, Optional, TypeVar, Any
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, constr
 
 T = TypeVar("T")
 
@@ -11,7 +11,13 @@ class PaginatedResponse(BaseModel, Generic[T]):
     page: int
     page_size: int
 
-# ==================== AUTH ====================
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: constr(min_length=8)
+
 class LoginRequest(BaseModel):
     username: str
     password: str

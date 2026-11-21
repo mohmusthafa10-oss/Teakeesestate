@@ -22,6 +22,18 @@ class Settings(BaseSettings):
 
     UPLOAD_DIR: str = "./uploads"
 
+    # Mail & Password Reset Settings
+    MAIL_USERNAME: str = "admin@testate.in"
+    MAIL_PASSWORD: str = ""
+    MAIL_FROM: str = "admin@testate.in"
+    MAIL_PORT: int = 587
+    MAIL_SERVER: str = "smtp.gmail.com"
+    MAIL_FROM_NAME: str = "Teakees CRM"
+    MAIL_STARTTLS: bool = True
+    MAIL_SSL_TLS: bool = False
+    USE_CREDENTIALS: bool = False
+    FRONTEND_URL: str = "http://localhost:3000"
+
     @field_validator("SECRET_KEY")
     def validate_production_secret(cls, v: str, info) -> str:
         # In production, disallow development fallback keys

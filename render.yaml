@@ -1,0 +1,51 @@
+# Render Blueprint — Teakees Real Estate CRM
+# https://render.com/docs/blueprint-spec
+#
+# Deploy this project on Render by connecting the GitHub repo.
+# Set DATABASE_URL and SECRET_KEY in the Render Environment Variables UI
+# (never commit real credentials here).
+
+services:
+  # --- Backend: FastAPI ---
+  - type: web
+    name: teakees-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PROJECT_NAME
+        value: "Teakees Real Estate CRM"
+      - key: ENVIRONMENT
+        value: "production"
+      - key: SECRET_KEY
+        sync: false          # Set manually in Render dashboard
+      - key: ALGORITHM
+        value: "HS256"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "120"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "7"
+      - key: DATABASE_URL
+        sync: false          # Set manually in Render dashboard — Render PostgreSQL internal URL
+      - key: CORS_ORIGINS
+        sync: false          # Set to your Render frontend URL e.g. ["https://my-app.onrender.com"]
+      - key: UPLOAD_DIR
+        value: "/var/data/uploads"
+    disk:
+      name: uploads-disk
+      mountPath: /var/data/uploads
+      sizeGB: 1
+
+  # --- Frontend: React 19 + Vite (Static Site) ---
+  - type: static
+    name: teakees-frontend
+    rootDir: .
+    buildCommand: npm install --legacy-peer-deps && npm run build
+    staticPublishPath: dist
+    autoDeploy: true
+    envVars:
+      - key: VITE_API_URL
+        sync: false          # Set to your backend URL e.g. https://teakees-backend.onrender.com

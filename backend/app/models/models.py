@@ -243,6 +243,74 @@ class User(Base, TimestampMixin):
         back_populates="actor",
         foreign_keys="ActivityLog.actor_id",
     )
+    # New relationship for password reset tokens
+    password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship(
+        "PasswordResetToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return f"<User(id='{self.id}', email='{self.email}', name='{self.name}', role='{self.role}')>"
+
+    """User account model for Admins and Agents."""
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(50), default=UserRole.AGENT.value, nullable=False)
+    designation: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    # Relationships
+    properties: Mapped[List["Property"]] = relationship(
+        "Property",
+        back_populates="assigned_agent",
+        foreign_keys="Property.assigned_agent_id",
+    )
+    sellers: Mapped[List["Seller"]] = relationship(
+        "Seller",
+        back_populates="assigned_agent",
+        foreign_keys="Seller.assigned_agent_id",
+    )
+    leads: Mapped[List["Lead"]] = relationship(
+        "Lead",
+        back_populates="assigned_agent",
+        foreign_keys="Lead.assigned_agent_id",
+    )
+    follow_ups: Mapped[List["FollowUp"]] = relationship(
+        "FollowUp",
+        back_populates="assigned_agent",
+        foreign_keys="FollowUp.assigned_agent_id",
+    )
+    site_visits: Mapped[List["SiteVisit"]] = relationship(
+        "SiteVisit",
+        back_populates="agent",
+        foreign_keys="SiteVisit.agent_id",
+    )
+    deals: Mapped[List["Deal"]] = relationship(
+        "Deal",
+        back_populates="assigned_agent",
+        foreign_keys="Deal.assigned_agent_id",
+    )
+    price_histories: Mapped[List["PriceHistory"]] = relationship(
+        "PriceHistory",
+        back_populates="updated_by_user",
+        foreign_keys="PriceHistory.updated_by",
+    )
+    seller_advances: Mapped[List["SellerAdvance"]] = relationship(
+        "SellerAdvance",
+        back_populates="recorded_by_user",
+        foreign_keys="SellerAdvance.recorded_by",
+    )
+    activity_logs: Mapped[List["ActivityLog"]] = relationship(
+        "ActivityLog",
+        back_populates="actor",
+        foreign_keys="ActivityLog.actor_id",
+    )
 
     def __repr__(self) -> str:
         return f"<User(id='{self.id}', email='{self.email}', name='{self.name}', role='{self.role}')>"
@@ -971,6 +1039,25 @@ class AgencySetting(Base, TimestampMixin):
     def __repr__(self) -> str:
         return f"<AgencySetting(key='{self.key}')>"
 
+
+class PasswordResetToken(Base, TimestampMixin):
+    """One‑time token for password‑reset flow.
+    Stores a SHA‑256 hash of the raw token, an expiry timestamp, and a used flag.
+    """
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    user = relationship("User", back_populates="password_reset_tokens")
+
+    def __repr__(self) -> str:
+        return f"<PasswordResetToken(id='{self.id}', user_id='{self.user_id}', used={self.used})>"
 
 class SequenceCounter(Base):
     """Sequential ID counter table for thread-safe sequential code generation (e.g. TAK, SLR, LED, DL)."""

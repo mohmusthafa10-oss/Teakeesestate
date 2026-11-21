@@ -1,5 +1,11 @@
 import os
 import sys
+
+# Ensure test environment uses SQLite test database before loading application settings
+os.environ["DATABASE_URL"] = "sqlite:///./test_crm.db"
+os.environ["ENVIRONMENT"] = "testing"
+os.environ["SECRET_KEY"] = "test-secret-key-for-automated-pytest-suite-32chars"
+
 from typing import Generator
 import pytest
 from fastapi.testclient import TestClient

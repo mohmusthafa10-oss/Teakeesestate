@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
@@ -9,7 +9,7 @@ from app.core.rate_limiter import login_limiter
 from app.core.security import create_access_token, create_refresh_token, decode_token, get_password_hash
 from app.database.session import get_db
 from app.models.models import User
-from app.schemas.schemas import ChangePasswordRequest, ProfileUpdate, RefreshTokenRequest, TokenResponse, UserResponse
+from app.schemas.schemas import ChangePasswordRequest, ProfileUpdate, RefreshTokenRequest, TokenResponse, UserResponse, ForgotPasswordRequest, ResetPasswordRequest
 from app.services.services import authenticate_user
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -126,4 +126,65 @@ def update_current_user_profile(
 @router.post("/logout")
 def logout():
     return {"message": "Logged out successfully"}
+
+# ---------------------------------------------------
+# Password reset workflow
+# ---------------------------------------------------
+
+from fastapi import BackgroundTasks
+import secrets, hashlib
+from datetime import datetime, timedelta
+from app.models.models import PasswordResetToken
+from app.schemas.schemas import ForgotPasswordRequest, ResetPasswordRequest
+from app.services.email_service import send_password_reset
+
+@router.post("/forgot-password")
+async def request_password_reset(
+    payload: ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    # Find user (case‑insensitive) – do not reveal existence
+    user = db.query(User).filter(User.email == payload.email.strip().lower()).first()
+    if user:
+        raw_token = secrets.token_hex(32)
+        token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+        expires_at = datetime.utcnow() + timedelta(minutes=15)
+        db.add(
+            PasswordResetToken(
+                user_id=user.id,
+                token_hash=token_hash,
+                expires_at=expires_at,
+            )
+        )
+        db.commit()
+        background_tasks.add_task(send_password_reset, user.email, raw_token)
+    # Always return generic message
+    return {"message": "If an account with that email exists, a reset link has been sent."}
+
+@router.post("/reset-password")
+def reset_password(
+    payload: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    token_hash = hashlib.sha256(payload.token.encode()).hexdigest()
+    reset_record = (
+        db.query(PasswordResetToken)
+        .filter(
+            PasswordResetToken.token_hash == token_hash,
+            PasswordResetToken.expires_at > datetime.utcnow(),
+            PasswordResetToken.used.is_(False),
+        )
+        .first()
+    )
+    if not reset_record:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+    user = db.get(User, reset_record.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.password_hash = get_password_hash(payload.new_password)
+    reset_record.used = True
+    db.commit()
+    return {"message": "Password has been reset successfully."}
+
 

@@ -26,11 +26,14 @@ from app.api.routes import (
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.database.base import Base
-from app.database.session import SessionLocal, engine
+from app.database.session import SessionLocal, engine, validate_database_connection
 from app.models.models import SequenceCounter, User
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Validate database connection on startup — fails fast with a clear error message
+    validate_database_connection()
+
     # Startup: ensure tables exist
     Base.metadata.create_all(bind=engine)
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
