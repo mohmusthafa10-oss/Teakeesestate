@@ -1,12 +1,18 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Image as ImageIcon, Lock, Plus, RotateCcw, ShieldCheck, Trash2, Upload, UserPlus } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { useCRM } from '../context/CRMContext';
+import { apiClient, ServerUserRole, TeamMemberDTO } from '../services/apiClient';
 import { crmService, DEFAULT_LOGO_URL } from '../services/crmService';
-import { PropertyType, UserRole } from '../types/crm';
+import { PropertyType } from '../types/crm';
 import { ConfirmDialog, Modal } from '../components/common/UIPrimitives';
 
 export const SettingsPage: React.FC = () => {
+  const { crmUser } = useAuth();
   const { db, currentUser, isAdmin, updateDb, resetDemo, notify } = useCRM();
+
+  const [pgUsers, setPgUsers] = useState<TeamMemberDTO[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
   const [agencyName, setAgencyName] = useState(db.settings.agencyName);
   const [agencyTagline, setAgencyTagline] = useState(db.settings.agencyTagline);
@@ -28,10 +34,27 @@ export const SettingsPage: React.FC = () => {
   const [uName, setUName] = useState('');
   const [uEmail, setUEmail] = useState('');
   const [uPhone, setUPhone] = useState('');
-  const [uRole, setURole] = useState<UserRole>('Agent');
-  const [uDesignation, setUDesignation] = useState('Property Advisor');
+  const [uRole, setURole] = useState<ServerUserRole>('AGENT');
+  const [uDesignation, setUDesignation] = useState('Salesperson / Advisor');
 
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
+
+  const loadPgUsers = useCallback(async () => {
+    if (!isAdmin) return;
+    setLoadingUsers(true);
+    try {
+      const res = await apiClient.getAdminUsers();
+      setPgUsers(res.items);
+    } catch {
+      // ignore if not signed in
+    } finally {
+      setLoadingUsers(false);
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    void loadPgUsers();
+  }, [loadPgUsers]);
 
   useEffect(() => {
     setAgencyName(db.settings.agencyName);
@@ -336,15 +359,15 @@ export const SettingsPage: React.FC = () => {
         )}
       </form>
 
-      {/* Team & Agent Management + Roles */}
+      {/* Team & Agent Management + 3 PostgreSQL Roles */}
       <div className="bg-[#FFFFFF] border border-[#E5E4DA] rounded-2xl overflow-hidden">
         <div className="px-6 py-4 border-b border-[#E5E4DA] flex items-center justify-between">
           <div>
             <h2 className="text-sm font-semibold text-[#20251F]">
-              Users, Agents & Access Control
+              Team Members & Role-Based Access Control (PostgreSQL)
             </h2>
             <p className="text-[11px] text-[#77796F]">
-              Admins have full access. Agents view and manage their assigned leads, sellers, properties, follow-ups, and deals.
+              ADMIN: full review, publishing & assignment. TELECALLER: property submission & own list only. AGENT: assigned properties & follow-ups only.
             </p>
           </div>
           {isAdmin && (
@@ -354,7 +377,7 @@ export const SettingsPage: React.FC = () => {
               className="h-8 px-3 rounded-lg bg-[#E4EBE0] hover:bg-[#064E3B] text-[#064E3B] hover:text-[#FFFFFF] text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
             >
               <UserPlus className="w-3.5 h-3.5" />
-              Add Team Member
+              Add / Invite Team Member
             </button>
           )}
         </div>
@@ -371,88 +394,87 @@ export const SettingsPage: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#E5E4DA] text-xs">
-              {db.users.map((u) => {
-                const isSelf = u.id === currentUser.id;
-                return (
-                  <tr key={u.id} className="hover:bg-[#F1F0E8]/40">
-                    <td className="py-3 px-5 font-semibold text-[#20251F]">
-                      {u.name}
-                    </td>
-                    <td className="py-3 px-3 text-[#77796F]">
-                      <span className="block">{u.email}</span>
-                      <span className="font-mono text-[11px]">{u.phone}</span>
-                    </td>
-                    <td className="py-3 px-3">{u.designation}</td>
-                    <td className="py-3 px-3">
-                      <select
-                        disabled={!isAdmin || isSelf}
-                        value={u.role}
-                        onChange={(e) =>
-                          updateDb(
-                            (prev) =>
-                              crmService.upsertUser(prev, {
-                                ...u,
-                                role: e.target.value as UserRole,
-                              }),
-                            `Updated ${u.name}'s role to ${e.target.value}`
-                          )
-                        }
-                        className="h-7 px-2 text-[11px] border border-[#E5E4DA] rounded bg-[#FFFFFF] disabled:opacity-60"
-                      >
-                        <option value="Admin">Admin</option>
-                        <option value="Agent">Agent</option>
-                      </select>
-                    </td>
-                    <td className="py-3 px-3">
-                      <button
-                        type="button"
-                        disabled={!isAdmin || isSelf}
-                        onClick={() =>
-                          updateDb(
-                            (prev) =>
-                              crmService.upsertUser(prev, {
-                                ...u,
-                                active: !u.active,
-                              }),
-                            `${u.name} ${u.active ? 'deactivated' : 'activated'}`
-                          )
-                        }
-                        className={`text-[11px] font-medium px-2 py-0.5 rounded border ${
-                          u.active
-                            ? 'bg-[#E4EBE0] text-[#064E3B] border-[#A8B9A2]/60'
-                            : 'bg-[#F1F0E8] text-[#77796F] border-[#E5E4DA]'
-                        }`}
-                      >
-                        {u.active ? 'Active' : 'Inactive'}
-                      </button>
-                    </td>
-                    <td className="py-3 px-5 text-right">
-                      {isSelf ? (
-                        <span className="text-[11px] font-semibold text-[#064E3B] inline-flex items-center gap-1">
-                          <ShieldCheck className="w-3.5 h-3.5" />
-                          Active View
-                        </span>
-                      ) : (
+              {loadingUsers ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-[#77796F]">
+                    Loading team directory...
+                  </td>
+                </tr>
+              ) : (
+                pgUsers.map((u) => {
+                  const isSelf = crmUser ? u.id === crmUser.id : false;
+                  return (
+                    <tr key={u.id} className="hover:bg-[#F1F0E8]/40">
+                      <td className="py-3 px-5 font-semibold text-[#20251F]">
+                        {u.name}
+                      </td>
+                      <td className="py-3 px-3 text-[#77796F]">
+                        <span className="block">{u.email}</span>
+                        <span className="font-mono text-[11px]">{u.phone || '—'}</span>
+                      </td>
+                      <td className="py-3 px-3">{u.designation}</td>
+                      <td className="py-3 px-3">
+                        <select
+                          disabled={!isAdmin || isSelf}
+                          value={u.role}
+                          onChange={async (e) => {
+                            const nextRole = e.target.value as ServerUserRole;
+                            try {
+                              await apiClient.updateAdminUser(u.id, { role: nextRole });
+                              notify(`Updated ${u.name}'s role to ${nextRole}.`, 'success');
+                              await loadPgUsers();
+                            } catch (err: any) {
+                              notify(err?.message || 'Role update failed.', 'error');
+                            }
+                          }}
+                          className="h-7 px-2 text-[11px] border border-[#E5E4DA] rounded bg-[#FFFFFF] disabled:opacity-60"
+                        >
+                          <option value="ADMIN">ADMIN</option>
+                          <option value="TELECALLER">TELECALLER</option>
+                          <option value="AGENT">AGENT</option>
+                        </select>
+                      </td>
+                      <td className="py-3 px-3">
                         <button
                           type="button"
-                          onClick={() =>
-                            updateDb(
-                              (prev) => ({
-                                ...prev,
-                                settings: { ...prev.settings, currentUserId: u.id },
-                              }),
-                              `Switched session to ${u.name} (${u.role})`
-                            )
-                          }
-                          className="text-xs font-medium text-[#064E3B] hover:underline cursor-pointer"
+                          disabled={!isAdmin || isSelf}
+                          onClick={async () => {
+                            try {
+                              await apiClient.updateAdminUser(u.id, { active: !u.active });
+                              notify(
+                                `${u.name} ${u.active ? 'deactivated' : 'activated'}.`,
+                                'info'
+                              );
+                              await loadPgUsers();
+                            } catch (err: any) {
+                              notify(err?.message || 'Status update failed.', 'error');
+                            }
+                          }}
+                          className={`text-[11px] font-medium px-2 py-0.5 rounded border cursor-pointer disabled:opacity-60 ${
+                            u.active
+                              ? 'bg-[#E4EBE0] text-[#064E3B] border-[#A8B9A2]/60'
+                              : 'bg-[#F1F0E8] text-[#77796F] border-[#E5E4DA]'
+                          }`}
                         >
-                          Switch View
+                          {u.active ? 'Active' : 'Inactive'}
                         </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                      </td>
+                      <td className="py-3 px-5 text-right">
+                        {isSelf ? (
+                          <span className="text-[11px] font-semibold text-[#064E3B] inline-flex items-center gap-1">
+                            <ShieldCheck className="w-3.5 h-3.5" />
+                            Signed In
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-[#77796F]">
+                            Google SSO Ready
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -640,28 +662,31 @@ export const SettingsPage: React.FC = () => {
       <Modal
         open={userModalOpen}
         onClose={() => setUserModalOpen(false)}
-        title="Add Team Member"
+        title="Add / Invite Team Member"
+        subtitle="Authorized Google accounts automatically receive their assigned role on sign-in."
         maxWidthClass="max-w-md"
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             if (!uName.trim() || !uEmail.trim()) return;
-            updateDb(
-              (prev) =>
-                crmService.upsertUser(prev, {
-                  name: uName,
-                  email: uEmail,
-                  phone: uPhone,
-                  role: uRole,
-                  designation: uDesignation,
-                }),
-              'Team member added'
-            );
-            setUName('');
-            setUEmail('');
-            setUPhone('');
-            setUserModalOpen(false);
+            try {
+              await apiClient.createAdminUser({
+                name: uName.trim(),
+                email: uEmail.trim(),
+                phone: uPhone.trim(),
+                role: uRole,
+                designation: uDesignation.trim(),
+              });
+              notify(`Team member ${uName.trim()} (${uRole}) added.`, 'success');
+              setUName('');
+              setUEmail('');
+              setUPhone('');
+              setUserModalOpen(false);
+              await loadPgUsers();
+            } catch (err: any) {
+              notify(err?.message || 'Unable to add team member.', 'error');
+            }
           }}
           className="space-y-4"
         >
@@ -676,7 +701,7 @@ export const SettingsPage: React.FC = () => {
             />
           </div>
           <div>
-            <label className="block text-xs font-medium mb-1">Email *</label>
+            <label className="block text-xs font-medium mb-1">Google Email *</label>
             <input
               type="email"
               required
@@ -699,11 +724,12 @@ export const SettingsPage: React.FC = () => {
               <label className="block text-xs font-medium mb-1">Role</label>
               <select
                 value={uRole}
-                onChange={(e) => setURole(e.target.value as UserRole)}
-                className="w-full h-9 px-2.5 text-xs border border-[#E5E4DA] rounded-lg"
+                onChange={(e) => setURole(e.target.value as ServerUserRole)}
+                className="w-full h-9 px-2.5 text-xs border border-[#E5E4DA] rounded-lg bg-[#FFFFFF]"
               >
-                <option value="Agent">Agent</option>
-                <option value="Admin">Admin</option>
+                <option value="AGENT">AGENT</option>
+                <option value="TELECALLER">TELECALLER</option>
+                <option value="ADMIN">ADMIN</option>
               </select>
             </div>
             <div>
@@ -728,7 +754,7 @@ export const SettingsPage: React.FC = () => {
               type="submit"
               className="px-4 py-2 text-xs font-medium rounded-lg bg-[#064E3B] text-[#FFFFFF] cursor-pointer"
             >
-              Add User
+              Save Team Member
             </button>
           </div>
         </form>

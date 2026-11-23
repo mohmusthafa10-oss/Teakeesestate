@@ -1,11 +1,15 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Activity,
   BarChart3,
   Building2,
   CalendarCheck2,
+  ExternalLink,
+  Globe,
   Handshake,
+  History,
   Home,
+  Inbox,
   LayoutDashboard,
   Settings,
   TrendingUp,
@@ -13,7 +17,9 @@ import {
   Users,
   X,
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 import { useCRM } from '../../context/CRMContext';
+import { apiClient } from '../../services/apiClient';
 import { RoutePage } from '../../types/crm';
 import { getTodayISO } from '../../utils/formatters';
 
@@ -31,10 +37,13 @@ interface NavGroup {
 export const Sidebar: React.FC<{
   mobileOpen: boolean;
   onCloseMobile: () => void;
-}> = ({ mobileOpen, onCloseMobile }) => {
+  onNavigatePath: (path: string) => void;
+}> = ({ mobileOpen, onCloseMobile, onNavigatePath }) => {
+  const { crmUser } = useAuth();
   const {
     db,
     currentUser,
+    isAdmin,
     route,
     navigate,
     visibleProperties,
@@ -43,6 +52,20 @@ export const Sidebar: React.FC<{
     visibleFollowUps,
     visibleDeals,
   } = useCRM();
+
+  const [submissionAttentionCount, setSubmissionAttentionCount] = useState<number>(0);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    apiClient
+      .getAdminSubmissions({ limit: 1 })
+      .then((res) => {
+        setSubmissionAttentionCount(
+          (res.summary.pendingReview || 0) + (res.summary.overdueContact || 0)
+        );
+      })
+      .catch(() => {});
+  }, [isAdmin, route.page]);
 
   const today = getTodayISO();
   const pendingTodayOrOverdue = visibleFollowUps.filter(
@@ -55,92 +78,169 @@ export const Sidebar: React.FC<{
     (d) => !['Closed', 'Cancelled', 'Lost'].includes(d.status)
   ).length;
 
-  const navGroups: NavGroup[] = [
-    {
-      label: 'Overview',
-      items: [
+  const navGroups: NavGroup[] = isAdmin
+    ? [
         {
-          label: 'Dashboard',
-          page: 'dashboard',
-          icon: LayoutDashboard,
-        },
-      ],
-    },
-    {
-      label: 'Inventory & Clients',
-      items: [
-        {
-          label: 'Properties',
-          page: 'properties',
-          icon: Building2,
-          activeMatches: ['properties', 'property-detail', 'register-property'],
-          count: visibleProperties.length,
+          label: 'Overview',
+          items: [
+            {
+              label: 'Dashboard',
+              page: 'dashboard',
+              icon: LayoutDashboard,
+            },
+          ],
         },
         {
-          label: 'Leads',
-          page: 'leads',
-          icon: Users,
-          activeMatches: ['leads', 'lead-detail'],
-          count: visibleLeads.length,
+          label: 'Submissions & Publishing',
+          items: [
+            {
+              label: 'Property Submissions',
+              page: 'submissions',
+              icon: Inbox,
+              count: submissionAttentionCount,
+            },
+            {
+              label: 'Publishing & Media',
+              page: 'portfolio-publishing',
+              icon: Globe,
+            },
+          ],
         },
         {
-          label: 'Sellers',
-          page: 'sellers',
-          icon: UserCheck,
-          activeMatches: ['sellers', 'seller-detail'],
-          count: visibleSellers.length,
+          label: 'Inventory & Clients',
+          items: [
+            {
+              label: 'Properties',
+              page: 'properties',
+              icon: Building2,
+              activeMatches: ['properties', 'property-detail', 'register-property'],
+              count: visibleProperties.length,
+            },
+            {
+              label: 'Leads',
+              page: 'leads',
+              icon: Users,
+              activeMatches: ['leads', 'lead-detail'],
+              count: visibleLeads.length,
+            },
+            {
+              label: 'Sellers',
+              page: 'sellers',
+              icon: UserCheck,
+              activeMatches: ['sellers', 'seller-detail'],
+              count: visibleSellers.length,
+            },
+            {
+              label: 'Running Properties',
+              page: 'running-properties',
+              icon: Activity,
+              count: runningCount,
+            },
+          ],
         },
         {
-          label: 'Running Properties',
-          page: 'running-properties',
-          icon: Activity,
-          count: runningCount,
-        },
-      ],
-    },
-    {
-      label: 'Operations',
-      items: [
-        {
-          label: 'Follow-ups',
-          page: 'follow-ups',
-          icon: CalendarCheck2,
-          count: pendingTodayOrOverdue,
-        },
-        {
-          label: 'Deals & Sales',
-          page: 'deals',
-          icon: Handshake,
-          count: activeDealsCount,
-        },
-        {
-          label: 'Investments & ROI',
-          page: 'investments',
-          icon: TrendingUp,
-        },
-        {
-          label: 'Stay & Rentals',
-          page: 'rentals',
-          icon: Home,
-        },
-      ],
-    },
-    {
-      label: 'Analytics & System',
-      items: [
-        {
-          label: 'Reports',
-          page: 'reports',
-          icon: BarChart3,
+          label: 'Operations',
+          items: [
+            {
+              label: 'Follow-ups',
+              page: 'follow-ups',
+              icon: CalendarCheck2,
+              count: pendingTodayOrOverdue,
+            },
+            {
+              label: 'Deals & Sales',
+              page: 'deals',
+              icon: Handshake,
+              count: activeDealsCount,
+            },
+            {
+              label: 'Investments & ROI',
+              page: 'investments',
+              icon: TrendingUp,
+            },
+            {
+              label: 'Stay & Rentals',
+              page: 'rentals',
+              icon: Home,
+            },
+          ],
         },
         {
-          label: 'Settings',
-          page: 'settings',
-          icon: Settings,
+          label: 'Governance & System',
+          items: [
+            {
+              label: 'Reports',
+              page: 'reports',
+              icon: BarChart3,
+            },
+            {
+              label: 'Audit Logs',
+              page: 'audit-logs',
+              icon: History,
+            },
+            {
+              label: 'Settings & Roles',
+              page: 'settings',
+              icon: Settings,
+            },
+          ],
         },
-      ],
-    },
-  ];
+      ]
+    : [
+        {
+          label: 'Salesperson Workspace',
+          items: [
+            {
+              label: 'Assigned Properties',
+              page: 'portfolio-publishing',
+              icon: Building2,
+            },
+            {
+              label: 'Dashboard',
+              page: 'dashboard',
+              icon: LayoutDashboard,
+            },
+          ],
+        },
+        {
+          label: 'My Assigned Records',
+          items: [
+            {
+              label: 'Properties',
+              page: 'properties',
+              icon: Building2,
+              activeMatches: ['properties', 'property-detail', 'register-property'],
+              count: visibleProperties.length,
+            },
+            {
+              label: 'Leads',
+              page: 'leads',
+              icon: Users,
+              activeMatches: ['leads', 'lead-detail'],
+              count: visibleLeads.length,
+            },
+            {
+              label: 'Sellers',
+              page: 'sellers',
+              icon: UserCheck,
+              activeMatches: ['sellers', 'seller-detail'],
+              count: visibleSellers.length,
+            },
+            {
+              label: 'Follow-ups',
+              page: 'follow-ups',
+              icon: CalendarCheck2,
+              count: pendingTodayOrOverdue,
+            },
+            {
+              label: 'Deals & Sales',
+              page: 'deals',
+              icon: Handshake,
+              count: activeDealsCount,
+            },
+          ],
+        },
+      ];
 
   const isNavActive = (item: NavGroup['items'][number]) => {
     if (item.activeMatches) return item.activeMatches.includes(route.page);
@@ -169,14 +269,7 @@ export const Sidebar: React.FC<{
             />
           ) : (
             <div className="w-9 h-9 rounded-lg bg-[#064E3B] flex items-center justify-center text-[#FFFFFF] shrink-0">
-              <svg width="20" height="10" viewBox="0 0 124 62" fill="none" aria-hidden="true">
-                <path
-                  d="M32 13C19.85 13 10 21.5 10 31C10 40.5 19.85 49 32 49C47 49 55 31 62 31C69 31 77 13 92 13C104.15 13 114 21.5 114 31C114 40.5 104.15 49 92 49C77 49 69 31 62 31C55 31 47 13 32 13Z"
-                  stroke="currentColor"
-                  strokeWidth="9"
-                  strokeLinecap="round"
-                />
-              </svg>
+              <Building2 className="w-4 h-4" />
             </div>
           )}
           <div className="min-w-0">
@@ -211,7 +304,7 @@ export const Sidebar: React.FC<{
               const active = isNavActive(item);
               return (
                 <button
-                  key={item.page}
+                  key={`${group.label}-${item.page}`}
                   type="button"
                   onClick={() => handleNavClick(item.page)}
                   className={`w-full px-3 py-2 rounded-lg text-[13px] flex items-center justify-between gap-2 transition-colors cursor-pointer whitespace-nowrap ${
@@ -228,7 +321,7 @@ export const Sidebar: React.FC<{
                     />
                     <span className="truncate">{item.label}</span>
                   </span>
-                  {typeof item.count === 'number' && (
+                  {typeof item.count === 'number' && item.count > 0 && (
                     <span
                       className={`text-[11px] font-mono tabular-nums shrink-0 ${
                         active ? 'text-[#E4EBE0]' : 'text-[#77796F]'
@@ -244,15 +337,27 @@ export const Sidebar: React.FC<{
         ))}
       </nav>
 
-      {/* Active Advisor Footer */}
-      <div className="p-4 border-t border-[#E5E4DA] bg-[#F1F0E8]/40 shrink-0">
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <div className="min-w-0">
-            <p className="font-semibold text-[#20251F] truncate">{currentUser.name}</p>
-            <p className="text-[11px] text-[#77796F] truncate">
-              {currentUser.role} · {currentUser.designation}
-            </p>
-          </div>
+      {/* Public Showcase Link + Authenticated User Footer */}
+      <div className="p-3.5 border-t border-[#E5E4DA] bg-[#F1F0E8]/40 space-y-2.5 shrink-0">
+        <button
+          type="button"
+          onClick={() => {
+            onCloseMobile();
+            onNavigatePath('/');
+          }}
+          className="w-full h-8 px-3 rounded-lg border border-[#E5E4DA] bg-[#FFFFFF] hover:bg-[#E4EBE0]/50 text-[11px] font-medium text-[#064E3B] flex items-center justify-between cursor-pointer"
+        >
+          <span>View Public Website</span>
+          <ExternalLink className="w-3.5 h-3.5" />
+        </button>
+
+        <div className="px-1 text-xs">
+          <p className="font-semibold text-[#20251F] truncate">
+            {crmUser?.name || currentUser.name}
+          </p>
+          <p className="text-[11px] text-[#77796F] truncate">
+            {crmUser?.role || currentUser.role} · {crmUser?.designation || currentUser.designation}
+          </p>
         </div>
       </div>
     </div>
@@ -260,12 +365,10 @@ export const Sidebar: React.FC<{
 
   return (
     <>
-      {/* Fixed Desktop Sidebar */}
       <aside className="no-print hidden lg:block fixed top-0 left-0 bottom-0 w-64 z-40">
         {sidebarContent}
       </aside>
 
-      {/* Mobile Slide-Over Sidebar */}
       {mobileOpen && (
         <div className="no-print lg:hidden fixed inset-0 z-50 flex">
           <div
