@@ -34,6 +34,7 @@ def generate_uuid() -> str:
 class UserRole(str, Enum):
     ADMIN = "Admin"
     AGENT = "Agent"
+    TELECALLER = "Telecaller"
 
 
 class SellerRelationship(str, Enum):
@@ -1069,3 +1070,86 @@ class SequenceCounter(Base):
 
     def __repr__(self) -> str:
         return f"<SequenceCounter(prefix='{self.prefix}', current_value={self.current_value})>"
+
+# ------------------------------------------------------------
+# New Enums for Property Submission Workflow
+# ------------------------------------------------------------
+class SubmissionStatus(str, Enum):
+    PENDING_REVIEW = "Pending Review"
+    UNDER_REVIEW = "Under Review"
+    APPROVED = "Approved"
+    REJECTED = "Rejected"
+    CONVERTED = "Converted to Property"
+
+class MediaCategory(str, Enum):
+    PHOTO = "photo"
+    VIDEO = "video"
+
+# ------------------------------------------------------------
+# New Models
+# ------------------------------------------------------------
+class PropertySubmission(Base, TimestampMixin):
+    __tablename__ = "property_submissions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    reference: Mapped[str] = mapped_column(String(20), unique=True, index=True, nullable=False)
+    seller_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    phone: Mapped[str] = mapped_column(String(50), nullable=False)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    location: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Optional fields
+    expected_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(14, 2), nullable=True)
+    size: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2), nullable=True)
+    bedrooms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    bathrooms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    status: Mapped[str] = mapped_column(String(30), default=SubmissionStatus.PENDING_REVIEW.value, nullable=False, index=True)
+    contact_deadline_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_contact_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    contact_status: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
+
+    assigned_agent_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    created_by_user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Relationships
+    assigned_agent: Mapped[Optional["User"]] = relationship("User", foreign_keys=[assigned_agent_id])
+    created_by_user: Mapped[Optional["User"]] = relationship("User", foreign_keys=[created_by_user_id])
+    media: Mapped[List["SubmissionMedia"]] = relationship("SubmissionMedia", back_populates="submission", cascade="all, delete-orphan")
+
+class SubmissionMedia(Base, TimestampMixin):
+    __tablename__ = "submission_media"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    submission_id: Mapped[str] = mapped_column(String(36), ForeignKey("property_submissions.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(String(20), nullable=False)  # MediaCategory values
+    order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    thumbnail_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    uploaded_by: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Relationships
+    submission: Mapped["PropertySubmission"] = relationship("PropertySubmission", back_populates="media")
+    uploader: Mapped[Optional["User"]] = relationship("User", foreign_keys=[uploaded_by])
+
+class PropertyPublication(Base, TimestampMixin):
+    __tablename__ = "property_publication"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    property_id: Mapped[str] = mapped_column(String(36), ForeignKey("properties.id", ondelete="CASCADE"), nullable=False, unique=True)
+    is_published: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_by_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    unpublished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    unpublished_by_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Relationships
+    property: Mapped["Property"] = relationship("Property", backref="publication")
+    published_by: Mapped[Optional["User"]] = relationship("User", foreign_keys=[published_by_id])
+    unpublished_by: Mapped[Optional["User"]] = relationship("User", foreign_keys=[unpublished_by_id])
+
+# ------------------------------------------------------------

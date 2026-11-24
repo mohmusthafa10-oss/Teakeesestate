@@ -23,6 +23,9 @@ from app.api.routes import (
     uploads,
     users,
 )
+# New routers for property submission workflow
+from app.api.routes.public import router as public_router
+from app.api.routes.admin_submissions import router as admin_submissions_router
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.database.base import Base
@@ -119,6 +122,10 @@ app.include_router(reports.router)
 app.include_router(users.router)
 app.include_router(settings_route.router)
 app.include_router(uploads.router)
+
+# Property submission workflow routers
+app.include_router(public_router)
+app.include_router(admin_submissions_router)
 
 @app.get("/api/health", tags=["Health"])
 def health_check():

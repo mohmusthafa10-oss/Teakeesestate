@@ -34,7 +34,13 @@ class Permission(str, Enum):
 
     REPORTS_READ = "reports.read"
     USERS_MANAGE = "users.manage"
-    SETTINGS_MANAGE = "settings.manage"
+    SUBMISSIONS_CREATE = "submissions.create"
+    SUBMISSIONS_READ = "submissions.read"
+    SUBMISSIONS_UPDATE = "submissions.update"
+    SUBMISSIONS_APPROVE = "submissions.approve"
+    PROPERTIES_PUBLISH = "properties.publish"
+    PROPERTIES_ASSIGN = "properties.assign"
+
 
 ROLE_PERMISSIONS: Dict[str, Set[str]] = {
     "Admin": {p.value for p in Permission},
@@ -56,6 +62,10 @@ ROLE_PERMISSIONS: Dict[str, Set[str]] = {
         Permission.DEALS_READ.value,
         Permission.DEALS_UPDATE.value,
         Permission.REPORTS_READ.value,
+    },
+    "Telecaller": {
+        Permission.SUBMISSIONS_CREATE.value,
+        Permission.SUBMISSIONS_READ.value,
     }
 }
 
