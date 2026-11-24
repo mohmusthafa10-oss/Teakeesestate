@@ -14,6 +14,34 @@ async function startServer() {
   app.use(express.json({ limit: '4mb' }));
   app.use(express.urlencoded({ extended: true, limit: '4mb' }));
 
+  const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (allowedOrigins.length > 0) {
+    app.use('/api', (req, res, next) => {
+      const origin = req.headers.origin;
+      if (origin && allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader(
+          'Access-Control-Allow-Headers',
+          'Authorization, Content-Type, Range'
+        );
+        res.setHeader(
+          'Access-Control-Allow-Methods',
+          'GET, POST, PATCH, PUT, DELETE, OPTIONS'
+        );
+      }
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+      next();
+    });
+  }
+
   // Public assets folder (logo, static uploads)
   const publicDir = path.resolve(process.cwd(), 'public');
   if (fs.existsSync(publicDir)) {

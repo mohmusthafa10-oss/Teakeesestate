@@ -129,6 +129,9 @@ export function serializeMediaDTO(
     mediaCategory: row.mediaCategory,
     displayOrder: row.displayOrder,
     isCover: row.isCover,
+    width: row.width ?? null,
+    height: row.height ?? null,
+    durationSeconds: row.durationSeconds ?? null,
     url: mediaStorage.getFileUrl(row, scope, 'full'),
     thumbnailUrl:
       row.mediaCategory === 'PHOTO'
@@ -242,6 +245,7 @@ export async function convertSubmissionToPropertyTx(params: {
           code: sellerCode,
           name: sub.sellerName,
           phone: cleanPhone,
+          email: sub.sellerEmail || '',
           whatsapp: cleanPhone,
           address: sub.location,
           relationshipWithProperty: 'Owner',

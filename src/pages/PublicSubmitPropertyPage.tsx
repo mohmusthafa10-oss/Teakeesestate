@@ -41,6 +41,7 @@ export const PublicSubmitPropertyPage: React.FC<PublicSubmitPropertyPageProps> =
 }) => {
   const [sellerName, setSellerName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
+  const [sellerEmail, setSellerEmail] = useState('');
   const [propertyType, setPropertyType] = useState('House');
   const [location, setLocation] = useState('');
   const [shortDescription, setShortDescription] = useState('');
@@ -125,7 +126,7 @@ export const PublicSubmitPropertyPage: React.FC<PublicSubmitPropertyPageProps> =
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
           file,
           category: 'VIDEO',
-          previewUrl: null,
+          previewUrl: URL.createObjectURL(file),
         });
       }
     });
@@ -150,6 +151,7 @@ export const PublicSubmitPropertyPage: React.FC<PublicSubmitPropertyPageProps> =
     });
     setSellerName('');
     setMobileNumber('');
+    setSellerEmail('');
     setPropertyType('House');
     setLocation('');
     setShortDescription('');
@@ -189,6 +191,7 @@ export const PublicSubmitPropertyPage: React.FC<PublicSubmitPropertyPageProps> =
     const formData = new FormData();
     formData.append('sellerName', sellerName.trim());
     formData.append('mobileNumber', mobileNumber.trim());
+    if (sellerEmail.trim()) formData.append('sellerEmail', sellerEmail.trim());
     formData.append('propertyType', propertyType);
     formData.append('location', location.trim());
     formData.append('shortDescription', shortDescription.trim());
@@ -236,7 +239,7 @@ export const PublicSubmitPropertyPage: React.FC<PublicSubmitPropertyPageProps> =
                 Property Submitted Successfully
               </h1>
               <p className="text-sm text-[#20251F]/85 max-w-xl mx-auto leading-relaxed">
-                Thank you for submitting your property! Our team has received your property details and will contact you within 48 hours to review and verify the information.
+                Thank you for submitting your property to Teakees Estate. Our team will review your details and contact you within 48 hours.
               </p>
             </div>
 
@@ -456,17 +459,31 @@ export const PublicSubmitPropertyPage: React.FC<PublicSubmitPropertyPageProps> =
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-[#77796F] mb-1">
-                    Additional Notes (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={additionalNotes}
-                    onChange={(e) => setAdditionalNotes(e.target.value)}
-                    placeholder="Best time to call, landmarks, or ownership notes..."
-                    className="w-full h-10 px-3 text-xs border border-[#E5E4DA] rounded-lg"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                  <div>
+                    <label className="block text-xs font-medium text-[#77796F] mb-1">
+                      Email Address (Optional)
+                    </label>
+                    <input
+                      type="email"
+                      value={sellerEmail}
+                      onChange={(e) => setSellerEmail(e.target.value)}
+                      placeholder="owner@example.com"
+                      className="w-full h-10 px-3 text-xs border border-[#E5E4DA] rounded-lg"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-[#77796F] mb-1">
+                      Additional Notes (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={additionalNotes}
+                      onChange={(e) => setAdditionalNotes(e.target.value)}
+                      placeholder="Best time to call, landmarks, or ownership notes..."
+                      className="w-full h-10 px-3 text-xs border border-[#E5E4DA] rounded-lg"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -568,6 +585,14 @@ export const PublicSubmitPropertyPage: React.FC<PublicSubmitPropertyPageProps> =
                             src={item.previewUrl}
                             alt={item.file.name}
                             className="w-full h-24 object-cover"
+                          />
+                        ) : item.previewUrl ? (
+                          <video
+                            src={item.previewUrl}
+                            controls
+                            muted
+                            preload="metadata"
+                            className="w-full h-24 object-cover bg-[#151D18]"
                           />
                         ) : (
                           <div className="w-full h-24 bg-[#151D18] text-[#E4EBE0] flex flex-col items-center justify-center p-2 text-center">

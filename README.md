@@ -1,96 +1,68 @@
-# Teakees Real Estate CRM
+# Teakees Real Estate CRM & Public Property Portal
 
-## Overview
+A full-stack, role-based Real Estate CRM and public property showcase platform built with **React 19**, **TypeScript**, **Tailwind CSS v4**, **Express**, **Drizzle ORM**, **Cloud SQL (PostgreSQL)**, and **Firebase Authentication**.
 
-A full‑stack Real Estate CRM built with **FastAPI**, **SQLAlchemy**, **Pydantic v2**, and a **React 19 + Vite** frontend. The backend uses PostgreSQL in production and SQLite for local development.
+---
 
-## Project Structure
-```
-├── backend/                # FastAPI backend
-│   ├── app/                # Application code
-│   ├── migrations/         # Alembic migrations
-│   ├── .env.example        # Example env vars (PostgreSQL URL example)
-│   └── requirements.txt    # Python dependencies
-├── src/                    # React 19 frontend (Vite)
-│   ├── pages/              # UI pages
-│   └── ...
-├── .gitignore
-├── package.json            # Frontend dependencies
-└── README.md               # This file
-```
+## Key Capabilities
 
-## Quick Start (Local Development)
+### 1. Public Portal (No Account Required)
+- **Public Showcase (`/`)**: Displays exclusively **approved and explicitly published** properties with search, property type filtering, location filtering, price range filters, and pagination. Strictly sanitizes DTOs (never exposes seller phone numbers, internal notes, or agent assignments).
+- **Public Property Detail (`/properties/:id`)**: High-resolution photo gallery, HTML5 `<video>` walkthrough playback, property specifications, and Teakees Advisory inquiry details.
+- **Public Seller Property Submission (`/submit-property`)**: Mobile-first intake form requiring only Seller Name, Mobile Number, Property Type, Property Location, and Short Description — plus optional specifications, desktop/gallery uploads, and mobile camera photo/video capture (`capture="environment"`). Returns a unique `SUB-YYYYMMDD-XXXX` reference number and 48-hour callback guarantee.
 
-### Backend
-1. Navigate to the backend directory:
-   ```bash
-   cd backend
-   ```
-2. Install Python dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. (Optional) Seed SQLite database for dev:
-   ```bash
-   python app/seed.py
-   ```
-4. Run the FastAPI server:
-   ```bash
-   uvicorn app.main:app --reload --port 8000
-   ```
-   API docs: `http://localhost:8000/docs`
+### 2. Three-Role Access Control (`ADMIN`, `TELECALLER`, `AGENT`)
+- **Admin (`ADMIN`)**:
+  - **Property Submissions Queue**: Review incoming public and telecaller submissions, inspect/download photos & videos, edit details, approve, request info, reject (with mandatory reason — rejected submissions are preserved for audit), and transactionally convert approved submissions into unpublished CRM properties.
+  - **48-Hour Seller Contact SLA**: Tracks `PENDING`, `OVERDUE` (>48h), and `CONTACTED` (updated only on explicit logged contact interactions, never merely from viewing).
+  - **Explicit Publishing Controls**: Properties start **unpublished** (`is_published = false`) after approval/conversion and only go live on explicit Admin publish action (`Publish` / `Unpublish` with confirmation & publication history).
+  - **Salesperson Assignment & Media Manager**: Assign properties to active advisors with full assignment history, upload photos/videos, reorder media, set cover images, and delete media.
+  - **Governance, Notifications & User Administration**: Real-time unread notifications bell, immutable `audit_logs`, and PostgreSQL team member management across `ADMIN`, `TELECALLER`, and `AGENT`.
+- **Telecaller (`TELECALLER`)**:
+  - Strictly isolated intake workspace displaying only the property submission form (with photo/video uploads) and **My Submitted Properties** list.
+- **Agent / Salesperson (`AGENT`)**:
+  - Scoped to assigned properties only (`GET /api/agent/properties`): view seller contact numbers, upload/manage property media on assigned properties, update field availability/notes, and log follow-up tasks. Blocked from publishing, reassignment, submissions admin queue, and settings.
 
-### Frontend
-1. Install Node dependencies (from project root):
-   ```bash
-   npm install --legacy-peer-deps
-   ```
-2. Start the Vite dev server:
-   ```bash
-   npm run dev
-   ```
-   UI: `http://localhost:3000`
+### 3. CRM Operations Workspace (`/crm`)
+- Complete agency modules including Executive Dashboard, Interactive Leaflet Property Map, Leads & Buyer-Property Matching Engine, Sellers Directory, Running Properties, Follow-ups Calendar, Deals & Sales, Investments & ROI, Stay & Rentals, and Reports.
 
-## Default Seed Credentials
-| Role | Email | Password |
-|------|-------|----------|
-| **Admin** | `admin@testate.in` | `admin123` |
-| **Agent** | `agent1@testate.in` | `agent123` |
+---
 
-## Running Automated Tests
+## Media Storage & Environment Configuration
+
+All media uploads are inspected for true **magic bytes** (blocking disguised executables/scripts), stripped of EXIF metadata, processed into WebP derivatives + `480×320` thumbnails via `sharp`, and served with HMAC-signed private tokens or strict public published checks + HTTP `206 Range` video streaming.
+
+Configure in environment variables (see `.env.example`):
+
+- `STORAGE_DRIVER`: `local` (default persistent disk) or `s3` (auto-selected when `S3_BUCKET`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, and `S3_SECRET_ACCESS_KEY` are configured).
+- `MEDIA_STORAGE_DIR`: Directory path for persisted media (`./storage/media` in local dev; point to a mounted persistent disk such as `/var/data/media` in production).
+- `STORAGE_REQUIRE_DURABLE`: Set `true` in production to refuse ephemeral `/tmp` storage.
+- `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_PUBLIC_BASE_URL`: S3-compatible object storage credentials (AWS S3, Cloudflare R2, DigitalOcean Spaces, MinIO) signed with AWS SigV4.
+- `CORS_ALLOWED_ORIGINS`: Comma-separated allowed frontend origins for `/api/*` requests.
+- `MAX_PHOTO_SIZE_MB`: Maximum photo upload size (default `10`).
+- `MAX_VIDEO_SIZE_MB`: Maximum video upload size (default `100`).
+- `MAX_PHOTOS_PER_SUBMISSION`: Default `12`.
+- `MAX_VIDEOS_PER_SUBMISSION`: Default `3`.
+- `MEDIA_TOKEN_SECRET`: Secret used to sign short-lived internal media preview/download URLs.
+- Cloud SQL PostgreSQL connection environment variables (`SQL_HOST`, `SQL_DB_NAME`, `SQL_ADMIN_USER`, `SQL_ADMIN_PASSWORD`) provided automatically at runtime.
+
+---
+
+## Commands
+
 ```bash
-python -m pytest backend/tests -v
+# Start full-stack Express + Vite development server (port 3000)
+npm run dev
+
+# Type-check with TypeScript
+npm run lint
+
+# Build frontend for production
+npm run build
+
+# Start production Express server
+npm start
+
+# Run automated workflow & RBAC tests
+npx tsx --test tests/apiWorkflow.test.ts
 ```
-All tests should pass.
-
----
-
-## Render Deployment (Production)
-
-### Backend (FastAPI)
-- **Build command:** `pip install -r requirements.txt`
-- **Start command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- **Environment variables:** set in Render UI:
-  - `PROJECT_NAME="Teakees Real Estate CRM"`
-  - `ENVIRONMENT="production"`
-  - `SECRET_KEY` (secure random string)
-  - `ALGORITHM="HS256"`
-  - `ACCESS_TOKEN_EXPIRE_MINUTES=120`
-  - `REFRESH_TOKEN_EXPIRE_DAYS=7`
-  - `DATABASE_URL` – PostgreSQL URL supplied by Render PostgreSQL add‑on, e.g. `postgresql+psycopg2://user:pass@host:5432/dbname`
-  - `CORS_ORIGINS` – your frontend URL, e.g. `https://my-frontend.onrender.com`
-  - `UPLOAD_DIR=/app/uploads`
-- **Post‑deploy script:** `alembic upgrade head`
-- **Health‑check endpoint:** `GET /api/health` returns `{ "status": "ok" }`
-
-### Frontend (React 19 + Vite)
-- **Build command:** `npm install --legacy-peer-deps && npm run build`
-- **Publish directory:** `dist/`
-- **Environment variable:** `VITE_API_URL` pointing to the backend URL (e.g. `https://my-backend.onrender.com`).
-
-Render will automatically provision a PostgreSQL instance; backups can be managed via Render's built‑in backup features.
-
----
-
-## License
-MIT License

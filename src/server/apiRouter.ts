@@ -77,6 +77,7 @@ async function cleanupStagingFiles(files: Express.Multer.File[]): Promise<void> 
 const submissionBodySchema = z.object({
   sellerName: z.string().trim().min(2, 'Seller name is required').max(120),
   mobileNumber: z.string().trim().min(7, 'Valid mobile number is required').max(30),
+  sellerEmail: z.string().trim().email('Please enter a valid email address').or(z.literal('')).optional(),
   propertyType: z.string().trim().min(2, 'Property type is required').max(60),
   location: z.string().trim().min(2, 'Property location is required').max(200),
   district: z.string().trim().max(100).optional(),
@@ -114,6 +115,10 @@ async function saveSubmissionWithMedia(params: {
     mimeType: string;
     fileType: string;
     fileSize: number;
+    width: number | null;
+    height: number | null;
+    durationSeconds: number | null;
+    storageProvider: 'LOCAL' | 'S3';
     displayOrder: number;
     isCover: boolean;
   }> = [];
@@ -150,6 +155,10 @@ async function saveSubmissionWithMedia(params: {
         mimeType: saved.mimeType,
         fileType: saved.fileType,
         fileSize: saved.fileSize,
+        width: saved.width,
+        height: saved.height,
+        durationSeconds: saved.durationSeconds,
+        storageProvider: saved.storageProvider,
         displayOrder: idx,
         isCover: saved.mediaCategory === 'PHOTO' && photoCount === 1,
       });
@@ -166,6 +175,7 @@ async function saveSubmissionWithMedia(params: {
           referenceNumber,
           sellerName: params.body.sellerName,
           mobileNumber: params.body.mobileNumber,
+          sellerEmail: params.body.sellerEmail || '',
           propertyType: params.body.propertyType,
           location: params.body.location,
           district: params.body.district || '',
@@ -198,6 +208,10 @@ async function saveSubmissionWithMedia(params: {
             mediaCategory: m.mediaCategory,
             displayOrder: m.displayOrder,
             isCover: m.isCover,
+            width: m.width,
+            height: m.height,
+            durationSeconds: m.durationSeconds,
+            storageProvider: m.storageProvider,
             thumbnailStorageKey: m.thumbnailStorageKey,
             uploadedBy: params.actor?.id ?? null,
           }))
@@ -727,6 +741,10 @@ export function createApiRouter(): express.Router {
               mediaCategory: saved.mediaCategory,
               displayOrder: nextOrder++,
               isCover,
+              width: saved.width,
+              height: saved.height,
+              durationSeconds: saved.durationSeconds,
+              storageProvider: saved.storageProvider,
               thumbnailStorageKey: saved.thumbnailStorageKey,
               uploadedBy: req.crmUser!.id,
             })
@@ -919,6 +937,7 @@ export function createApiRouter(): express.Router {
               referenceNumber: s.referenceNumber,
               sellerName: s.sellerName,
               mobileNumber: s.mobileNumber,
+              sellerEmail: s.sellerEmail,
               propertyType: s.propertyType,
               location: s.location,
               expectedPrice: s.expectedPrice,
@@ -1038,6 +1057,10 @@ export function createApiRouter(): express.Router {
                 mediaCategory: saved.mediaCategory,
                 displayOrder: order++,
                 isCover,
+                width: saved.width,
+                height: saved.height,
+                durationSeconds: saved.durationSeconds,
+                storageProvider: saved.storageProvider,
                 thumbnailStorageKey: saved.thumbnailStorageKey,
                 uploadedBy: req.crmUser!.id,
               })
@@ -1292,6 +1315,7 @@ export function createApiRouter(): express.Router {
         const patchSchema = z.object({
           sellerName: z.string().trim().min(2).max(120).optional(),
           mobileNumber: z.string().trim().min(7).max(30).optional(),
+          sellerEmail: z.string().trim().email('Invalid email address').or(z.literal('')).optional(),
           propertyType: z.string().trim().min(2).max(60).optional(),
           location: z.string().trim().min(2).max(200).optional(),
           district: z.string().trim().max(100).optional(),

@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useAuth } from './AuthContext';
 import { crmService } from '../services/crmService';
-import { apiClient } from '../services/apiClient';
 import { CRMDatabase, RoutePage, User } from '../types/crm';
 
 export interface RouteState {
@@ -26,7 +26,6 @@ interface CRMContextValue {
   isAdmin: boolean;
   route: RouteState;
   navigate: (next: RouteState, options?: { showLoader?: boolean }) => void;
-  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   isLoading: boolean;
   setIsLoading: (loading: boolean) => void;
@@ -36,7 +35,6 @@ interface CRMContextValue {
   dismissToast: (id: string) => void;
   updateDb: (updater: (prev: CRMDatabase) => CRMDatabase, toastMsg?: string) => boolean;
   resetDemo: () => void;
-  // Scoped datasets respecting Admin vs Agent role permissions
   visibleProperties: CRMDatabase['properties'];
   visibleSellers: CRMDatabase['sellers'];
   visibleLeads: CRMDatabase['leads'];
@@ -50,6 +48,9 @@ const VALID_PAGES: RoutePage[] = [
   'login',
   'profile',
   'dashboard',
+  'submissions',
+  'portfolio-publishing',
+  'audit-logs',
   'properties',
   'property-detail',
   'register-property',
@@ -77,12 +78,13 @@ function parseHashToRoute(): RouteState {
 }
 
 export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { crmUser, authStatus, signOutUser } = useAuth();
   const [db, setDb] = useState<CRMDatabase>(() => crmService.getDatabase());
   const [route, setRoute] = useState<RouteState>(() => parseHashToRoute());
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const [authUser, setAuthUser] = useState<User | null>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => !!localStorage.getItem('crm_access_token'));
+
+  const isAuthenticated = authStatus === 'authenticated' && Boolean(crmUser);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -120,50 +122,6 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     []
   );
 
-  // Authenticate & restore session on initial mount
-  useEffect(() => {
-    let isMounted = true;
-    const initAuth = async () => {
-      const token = localStorage.getItem('crm_access_token');
-      if (!token) {
-        if (isMounted) {
-          setIsAuthenticated(false);
-          setAuthUser(null);
-          setIsLoading(false);
-          if (window.location.hash !== '#/login') {
-            navigate({ page: 'login' });
-          }
-        }
-        return;
-      }
-
-      try {
-        const user = await apiClient.getMe();
-        if (isMounted) {
-          setAuthUser(user);
-          setIsAuthenticated(true);
-          setIsLoading(false);
-          if (parseHashToRoute().page === 'login') {
-            navigate({ page: 'dashboard' });
-          }
-        }
-      } catch (err) {
-        apiClient.logout();
-        if (isMounted) {
-          setIsAuthenticated(false);
-          setAuthUser(null);
-          setIsLoading(false);
-          navigate({ page: 'login' });
-        }
-      }
-    };
-
-    initAuth();
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
   // Sync document title with configurable agency name
   useEffect(() => {
     document.title = `${db.settings.agencyName} — Real Estate CRM`;
@@ -172,35 +130,16 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Listen to browser hash back/forward
   useEffect(() => {
     const handleHashChange = () => {
-      const parsed = parseHashToRoute();
-      if (!localStorage.getItem('crm_access_token') && parsed.page !== 'login') {
-        navigate({ page: 'login' });
-      } else {
-        setRoute(parsed);
-      }
+      setRoute(parseHashToRoute());
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [navigate]);
-
-  const login = useCallback(
-    async (username: string, password: string) => {
-      const res = await apiClient.login(username, password);
-      setAuthUser(res.user);
-      setIsAuthenticated(true);
-      notify(`Welcome back, ${res.user.name}!`, 'success');
-      navigate({ page: 'dashboard' }, { showLoader: true });
-    },
-    [navigate, notify]
-  );
+  }, []);
 
   const logout = useCallback(() => {
-    apiClient.logout();
-    setIsAuthenticated(false);
-    setAuthUser(null);
+    void signOutUser();
     notify('You have been signed out.', 'info');
-    navigate({ page: 'login' });
-  }, [navigate, notify]);
+  }, [signOutUser, notify]);
 
   const withLoader = useCallback(
     async <T,>(fn: () => Promise<T> | T, delayMs = 340): Promise<T> => {
@@ -241,20 +180,28 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, 500);
   }, [notify]);
 
-  // Current user is either the authenticated user from backend or fallback to db user
   const currentUser: User = useMemo(() => {
-    if (authUser) {
-      return authUser;
+    if (crmUser) {
+      const matchedLegacy = db.users.find(
+        (u) => u.email.toLowerCase() === crmUser.email.toLowerCase()
+      );
+      return {
+        id: matchedLegacy?.id || `usr-${crmUser.id}`,
+        name: crmUser.name,
+        email: crmUser.email,
+        phone: crmUser.phone,
+        role: crmUser.role === 'ADMIN' ? 'Admin' : 'Agent',
+        designation: crmUser.designation,
+        active: crmUser.active,
+        created_at: matchedLegacy?.created_at || new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
     }
-    return (
-      db.users.find((u) => u.id === db.settings.currentUserId) ||
-      db.users[0]
-    );
-  }, [authUser, db.users, db.settings.currentUserId]);
+    return db.users.find((u) => u.id === db.settings.currentUserId) || db.users[0];
+  }, [crmUser, db.users, db.settings.currentUserId]);
 
-  const isAdmin = currentUser?.role === 'Admin';
+  const isAdmin = crmUser?.role === 'ADMIN';
 
-  // Access control scoping: Admins see everything; Agents see assigned records
   const visibleProperties = useMemo(
     () =>
       isAdmin
@@ -302,7 +249,6 @@ export const CRMProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     isAdmin,
     route,
     navigate,
-    login,
     logout,
     isLoading,
     setIsLoading,

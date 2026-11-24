@@ -98,6 +98,7 @@ export const AdminSubmissionsPage: React.FC = () => {
   const [editTitleFields, setEditTitleFields] = useState({
     sellerName: '',
     mobileNumber: '',
+    sellerEmail: '',
     propertyType: '',
     location: '',
     shortDescription: '',
@@ -158,6 +159,7 @@ export const AdminSubmissionsPage: React.FC = () => {
       setEditTitleFields({
         sellerName: res.submission.sellerName,
         mobileNumber: res.submission.mobileNumber,
+        sellerEmail: res.submission.sellerEmail || '',
         propertyType: res.submission.propertyType,
         location: res.submission.location,
         shortDescription: res.submission.shortDescription,
@@ -183,6 +185,7 @@ export const AdminSubmissionsPage: React.FC = () => {
       await apiClient.updateAdminSubmission(selectedSub.id, {
         sellerName: editTitleFields.sellerName,
         mobileNumber: editTitleFields.mobileNumber,
+        sellerEmail: editTitleFields.sellerEmail,
         propertyType: editTitleFields.propertyType,
         location: editTitleFields.location,
         shortDescription: editTitleFields.shortDescription,
@@ -616,6 +619,17 @@ export const AdminSubmissionsPage: React.FC = () => {
                       className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg bg-[#FFFFFF]"
                     />
                   </div>
+                  <div>
+                    <label className="block text-[11px] font-medium mb-1">Seller Email</label>
+                    <input
+                      type="email"
+                      value={editTitleFields.sellerEmail}
+                      onChange={(e) =>
+                        setEditTitleFields({ ...editTitleFields, sellerEmail: e.target.value })
+                      }
+                      className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg bg-[#FFFFFF]"
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="block text-[11px] font-medium mb-1">Assign Salesperson</label>
@@ -687,6 +701,12 @@ export const AdminSubmissionsPage: React.FC = () => {
                       {selectedSub.mobileNumber}
                     </span>
                   </p>
+                  {selectedSub.sellerEmail && (
+                    <p>
+                      <span className="text-[#77796F]">Email:</span>{' '}
+                      <span>{selectedSub.sellerEmail}</span>
+                    </p>
+                  )}
                   <p>
                     <span className="text-[#77796F]">Assigned Agent:</span>{' '}
                     {selectedSub.assignedAgentName || 'Unassigned'}

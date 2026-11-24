@@ -1,446 +1,587 @@
-import {
-  ActivityLog,
-  CRMDatabase,
-  Deal,
-  FollowUp,
-  Investment,
-  Lead,
-  Property,
-  PropertyMatch,
-  RentalBooking,
-  Seller,
-  SellerAdvance,
-  SiteVisit,
-  User,
-} from '../types/crm';
-
-const rawBase = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
-const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const API_BASE = (rawBase || (isLocal ? 'http://localhost:8000' : 'https://teakeesestate.onrender.com')).replace(/\/+$/, '');
-const TOKEN_KEY = 'crm_access_token';
-const REFRESH_KEY = 'crm_refresh_token';
-
-class ApiClient {
-  private getHeaders(contentType: boolean = true): HeadersInit {
-    const headers: Record<string, string> = {};
-    if (contentType) {
-      headers['Content-Type'] = 'application/json';
-    }
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    return headers;
-  }
-
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${API_BASE}${endpoint}`;
-    const headers = { ...this.getHeaders(!(options.body instanceof FormData)), ...(options.headers as Record<string, string>) };
-    
-    let res = await fetch(url, { ...options, headers });
-
-    if (res.status === 401 && localStorage.getItem(REFRESH_KEY)) {
-      // Attempt token refresh
-      const refreshed = await this.refreshToken();
-      if (refreshed) {
-        const retryHeaders = {
-          ...this.getHeaders(!(options.body instanceof FormData)),
-          ...(options.headers as Record<string, string>),
-          Authorization: `Bearer ${localStorage.getItem(TOKEN_KEY)}`,
-        };
-        res = await fetch(url, { ...options, headers: retryHeaders });
-      }
-    }
-
-    if (!res.ok) {
-      let errorMsg = `API Error ${res.status}: ${res.statusText}`;
-      try {
-        const errJson = await res.json();
-        if (errJson.detail) {
-          errorMsg = typeof errJson.detail === 'string' ? errJson.detail : JSON.stringify(errJson.detail);
-        }
-      } catch {}
-      throw new Error(errorMsg);
-    }
-
-    if (res.status === 204) {
-      return {} as T;
-    }
-
-    return (await res.json()) as T;
-  }
-
-  // ==================== AUTH ====================
-  async login(username: string, password: string):Promise<{ access_token: string; refresh_token: string; user: User }> {
-    const formData = new URLSearchParams();
-    formData.append('username', username);
-    formData.append('password', password);
-
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formData.toString(),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Login failed' }));
-      throw new Error(err.detail || 'Login failed');
-    }
-
-    const data = await res.json();
-    localStorage.setItem(TOKEN_KEY, data.access_token);
-    localStorage.setItem(REFRESH_KEY, data.refresh_token);
-    return data;
-  }
-
-  async refreshToken(): Promise<boolean> {
-    const refresh = localStorage.getItem(REFRESH_KEY);
-    if (!refresh) return false;
-
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refresh }),
-      });
-      if (!res.ok) {
-        this.logout();
-        return false;
-      }
-      const data = await res.json();
-      localStorage.setItem(TOKEN_KEY, data.access_token);
-      return true;
-    } catch {
-      this.logout();
-      return false;
-    }
-  }
-
-  logout(): void {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_KEY);
-  }
-
-  async getMe(): Promise<User> {
-    return this.request<User>('/api/auth/me');
-  }
-
-  async updateProfile(data: { name?: string; phone?: string; designation?: string; password?: string }): Promise<User> {
-    return this.request<User>('/api/auth/profile', {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  // ==================== DASHBOARD ====================
-  async getDashboardSummary(): Promise<any> {
-    return this.request('/api/dashboard/summary');
-  }
-
-  async getRecentActivities(): Promise<ActivityLog[]> {
-    return this.request<ActivityLog[]>('/api/dashboard/activities');
-  }
-
-  // ==================== SELLERS ====================
-  async getSellers(params: { page?: number; page_size?: number; search?: string } = {}): Promise<{ items: Seller[]; total: number }> {
-    const query = new URLSearchParams();
-    if (params.page) query.append('page', params.page.toString());
-    if (params.page_size) query.append('page_size', params.page_size.toString());
-    if (params.search) query.append('search', params.search);
-    return this.request<{ items: Seller[]; total: number }>(`/api/sellers?${query.toString()}`);
-  }
-
-  async getSeller(id: string): Promise<Seller> {
-    return this.request<Seller>(`/api/sellers/${id}`);
-  }
-
-  async getSellerProperties(id: string): Promise<Property[]> {
-    return this.request<Property[]>(`/api/sellers/${id}/properties`);
-  }
-
-  async createSeller(data: Partial<Seller>): Promise<Seller> {
-    return this.request<Seller>('/api/sellers', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateSeller(id: string, data: Partial<Seller>): Promise<Seller> {
-    return this.request<Seller>(`/api/sellers/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  // ==================== PROPERTIES ====================
-  async getProperties(params: Record<string, any> = {}): Promise<{ items: Property[]; total: number }> {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') {
-        query.append(k, v.toString());
-      }
-    });
-    return this.request<{ items: Property[]; total: number }>(`/api/properties?${query.toString()}`);
-  }
-
-  async getProperty(id: string): Promise<Property> {
-    return this.request<Property>(`/api/properties/${id}`);
-  }
-
-  async getMapProperties(filters: Record<string, any> = {}): Promise<Property[]> {
-    const query = new URLSearchParams();
-    Object.entries(filters).forEach(([k, v]) => {
-      if (v) query.append(k, v.toString());
-    });
-    return this.request<Property[]>(`/api/properties/map?${query.toString()}`);
-  }
-
-  async createProperty(data: any): Promise<Property> {
-    return this.request<Property>('/api/properties', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateProperty(id: string, data: any): Promise<Property> {
-    return this.request<Property>(`/api/properties/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async getPropertyPriceHistory(id: string): Promise<any[]> {
-    return this.request<any[]>(`/api/properties/${id}/history`);
-  }
-
-  async getMatchingLeadsForProperty(id: string): Promise<any[]> {
-    return this.request<any[]>(`/api/properties/${id}/leads`);
-  }
-
-  // ==================== COMBINED REGISTRATION ====================
-  async registerSellerAndProperty(payload: any): Promise<{ seller: Seller; property: Property; advance?: SellerAdvance }> {
-    return this.request<{ seller: Seller; property: Property; advance?: SellerAdvance }>('/api/registration/seller-property', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  }
-
-  // ==================== LEADS ====================
-  async getLeads(params: Record<string, any> = {}): Promise<{ items: Lead[]; total: number }> {
-    const query = new URLSearchParams();
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') query.append(k, v.toString());
-    });
-    return this.request<{ items: Lead[]; total: number }>(`/api/leads?${query.toString()}`);
-  }
-
-  async getLead(id: string): Promise<Lead> {
-    return this.request<Lead>(`/api/leads/${id}`);
-  }
-
-  async createLead(data: any): Promise<Lead> {
-    return this.request<Lead>('/api/leads', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateLead(id: string, data: any): Promise<Lead> {
-    return this.request<Lead>(`/api/leads/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async getMatchingPropertiesForLead(id: string): Promise<any[]> {
-    return this.request<any[]>(`/api/leads/${id}/matches`);
-  }
-
-  // ==================== MATCHES ====================
-  async getMatches(params: { lead_id?: string; property_id?: string } = {}): Promise<PropertyMatch[]> {
-    const query = new URLSearchParams();
-    if (params.lead_id) query.append('lead_id', params.lead_id);
-    if (params.property_id) query.append('property_id', params.property_id);
-    return this.request<PropertyMatch[]>(`/api/matches?${query.toString()}`);
-  }
-
-  async createMatch(data: any): Promise<PropertyMatch> {
-    return this.request<PropertyMatch>('/api/matches', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateMatch(id: string, data: any): Promise<PropertyMatch> {
-    return this.request<PropertyMatch>(`/api/matches/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  // ==================== FOLLOW-UPS ====================
-  async getFollowUps(params: { page?: number; page_size?: number; status?: string } = {}): Promise<{ items: FollowUp[]; total: number }> {
-    const query = new URLSearchParams();
-    if (params.page) query.append('page', params.page.toString());
-    if (params.page_size) query.append('page_size', params.page_size.toString());
-    if (params.status) query.append('status', params.status);
-    return this.request<{ items: FollowUp[]; total: number }>(`/api/followups?${query.toString()}`);
-  }
-
-  async createFollowUp(data: any): Promise<FollowUp> {
-    return this.request<FollowUp>('/api/followups', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateFollowUp(id: string, data: any): Promise<FollowUp> {
-    return this.request<FollowUp>(`/api/followups/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async completeFollowUp(id: string, payload: any): Promise<FollowUp> {
-    return this.request<FollowUp>(`/api/followups/${id}/complete`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
-  }
-
-  // ==================== SITE VISITS ====================
-  async getSiteVisits(params: { property_id?: string; lead_id?: string } = {}): Promise<SiteVisit[]> {
-    const query = new URLSearchParams();
-    if (params.property_id) query.append('property_id', params.property_id);
-    if (params.lead_id) query.append('lead_id', params.lead_id);
-    return this.request<SiteVisit[]>(`/api/site-visits?${query.toString()}`);
-  }
-
-  async createSiteVisit(data: any): Promise<SiteVisit> {
-    return this.request<SiteVisit>('/api/site-visits', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateSiteVisit(id: string, data: any): Promise<SiteVisit> {
-    return this.request<SiteVisit>(`/api/site-visits/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  // ==================== DEALS ====================
-  async getDeals(params: { page?: number; page_size?: number; status?: string } = {}): Promise<{ items: Deal[]; total: number }> {
-    const query = new URLSearchParams();
-    if (params.page) query.append('page', params.page.toString());
-    if (params.page_size) query.append('page_size', params.page_size.toString());
-    if (params.status) query.append('status', params.status);
-    return this.request<{ items: Deal[]; total: number }>(`/api/deals?${query.toString()}`);
-  }
-
-  async createDeal(data: any): Promise<Deal> {
-    return this.request<Deal>('/api/deals', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateDeal(id: string, data: any): Promise<Deal> {
-    return this.request<Deal>(`/api/deals/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  // ==================== ADVANCES & INVESTMENTS ====================
-  async getAdvances(params: { seller_id?: string; property_id?: string } = {}): Promise<SellerAdvance[]> {
-    const query = new URLSearchParams();
-    if (params.seller_id) query.append('seller_id', params.seller_id);
-    if (params.property_id) query.append('property_id', params.property_id);
-    return this.request<SellerAdvance[]>(`/api/finance/advances?${query.toString()}`);
-  }
-
-  async createAdvance(data: any): Promise<SellerAdvance> {
-    return this.request<SellerAdvance>('/api/finance/advances', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateAdvance(id: string, data: any): Promise<SellerAdvance> {
-    return this.request<SellerAdvance>(`/api/finance/advances/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async getInvestments(): Promise<Investment[]> {
-    return this.request<Investment[]>('/api/finance/investments');
-  }
-
-  async createInvestment(data: any): Promise<Investment> {
-    return this.request<Investment>('/api/finance/investments', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  // ==================== RENTALS ====================
-  async getRentals(property_id?: string): Promise<RentalBooking[]> {
-    const query = property_id ? `?property_id=${property_id}` : '';
-    return this.request<RentalBooking[]>(`/api/rentals${query}`);
-  }
-
-  async createRental(data: any): Promise<RentalBooking> {
-    return this.request<RentalBooking>('/api/rentals', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateRental(id: string, data: any): Promise<RentalBooking> {
-    return this.request<RentalBooking>(`/api/rentals/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  // ==================== REPORTS ====================
-  async getPropertyReports(): Promise<any> {
-    return this.request('/api/reports/properties');
-  }
-
-  async getLeadReports(): Promise<any> {
-    return this.request('/api/reports/leads');
-  }
-
-  async getSalesReport(): Promise<any> {
-    return this.request('/api/reports/sales');
-  }
-
-  // ==================== SETTINGS & USERS ====================
-  async getSettings(): Promise<any> {
-    return this.request('/api/settings');
-  }
-
-  async updateSettings(data: any): Promise<any> {
-    return this.request('/api/settings', {
-      method: 'PUT',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async getUsers(): Promise<User[]> {
-    return this.request<User[]>('/api/users');
-  }
-
-  async createUser(data: any): Promise<User> {
-    return this.request<User>('/api/users', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
+import { auth } from '../lib/firebase';
+
+export type ServerUserRole = 'ADMIN' | 'TELECALLER' | 'AGENT';
+
+export interface CRMUserProfile {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  role: ServerUserRole;
+  designation: string;
+  active: boolean;
 }
 
-export const apiClient = new ApiClient();
+export interface MediaDTO {
+  id: number;
+  propertyId: number | null;
+  submissionId: number | null;
+  originalFilename?: string;
+  fileType: string;
+  mimeType: string;
+  fileSize: number;
+  mediaCategory: 'PHOTO' | 'VIDEO';
+  displayOrder: number;
+  isCover: boolean;
+  width?: number | null;
+  height?: number | null;
+  durationSeconds?: number | null;
+  url: string;
+  thumbnailUrl: string | null;
+  createdAt: string;
+}
+
+export interface PublicPropertyDTO {
+  id: number;
+  code: string;
+  title: string;
+  type: string;
+  category: string;
+  district: string;
+  panchayath: string;
+  locality: string;
+  location: string;
+  areaDisplay: string;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  roadConnectivity: string;
+  expectedPrice: number | null;
+  description: string;
+  status: string;
+  listedDate: string;
+  publishedAt: string | null;
+  coverImageUrl: string | null;
+  photos: MediaDTO[];
+  videos: MediaDTO[];
+}
+
+export interface PublicSubmissionReceipt {
+  referenceNumber: string;
+  status: string;
+  submittedAt: string;
+  contactDeadlineAt: string;
+  photoCount: number;
+  videoCount: number;
+}
+
+export type SubmissionStatusType =
+  | 'PENDING_REVIEW'
+  | 'UNDER_REVIEW'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CONVERTED_TO_PROPERTY';
+
+export interface SubmissionRecordDTO {
+  id: number;
+  referenceNumber: string;
+  sellerName: string;
+  mobileNumber: string;
+  sellerEmail?: string;
+  propertyType: string;
+  location: string;
+  district: string;
+  panchayath: string;
+  locality: string;
+  shortDescription: string;
+  expectedPrice: number | null;
+  propertySize: string | null;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  additionalNotes: string | null;
+  source: 'PUBLIC' | 'TELECALLER';
+  submittedByUserId: number | null;
+  submittedByName?: string | null;
+  status: SubmissionStatusType;
+  submittedAt: string;
+  contactDeadlineAt: string;
+  firstContactAt: string | null;
+  contactStatus: 'PENDING' | 'CONTACTED' | 'OVERDUE';
+  isContactOverdue: boolean;
+  reviewedBy: number | null;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  correctionNotes: string | null;
+  internalNotes: string;
+  assignedAgentId: number | null;
+  assignedAgentName: string | null;
+  convertedPropertyId: number | null;
+  photoCount?: number;
+  videoCount?: number;
+}
+
+export interface SubmissionSummaryStats {
+  total: number;
+  pendingReview: number;
+  underReview: number;
+  approved: number;
+  rejected: number;
+  converted: number;
+  overdueContact: number;
+}
+
+export interface SubmissionHistoryDTO {
+  id: number;
+  submissionId: number;
+  actorId: number | null;
+  actorName: string;
+  action: string;
+  previousStatus: string | null;
+  newStatus: string | null;
+  notes: string;
+  createdAt: string;
+}
+
+export interface AdminPropertyDTO {
+  id: number;
+  code: string;
+  title: string;
+  type: string;
+  category: string;
+  district: string;
+  panchayath: string;
+  locality: string;
+  location: string;
+  areaValue: number;
+  areaUnit: string;
+  areaDisplay: string;
+  bedrooms: number | null;
+  bathrooms: number | null;
+  roadConnectivity: string;
+  expectedPrice: number;
+  marketPrice: number | null;
+  description: string;
+  sellerId: number;
+  sellerName: string;
+  sellerPhone: string;
+  sellerWhatsapp?: string;
+  submissionId: number | null;
+  status: string;
+  approvalStatus: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+  isPublished: boolean;
+  publishedAt: string | null;
+  unpublishedAt: string | null;
+  assignedAgentId: number | null;
+  assignedAgentName?: string;
+  internalNotes: string;
+  listedDate: string;
+  createdAt: string;
+  updatedAt: string;
+  media: MediaDTO[];
+  coverImageUrl: string | null;
+}
+
+export interface TeamMemberDTO {
+  id: number;
+  name: string;
+  email: string;
+  phone: string;
+  role: ServerUserRole;
+  designation: string;
+  active: boolean;
+}
+
+export interface NotificationDTO {
+  id: number;
+  eventType: string;
+  title: string;
+  message: string;
+  entityType: string;
+  entityId: number;
+  isRead: boolean;
+  createdAt: string;
+}
+
+export interface AuditLogDTO {
+  id: number;
+  actorId: number | null;
+  actorName: string;
+  actorRole: string;
+  action: string;
+  entityType: string;
+  entityId: string;
+  previousValue: unknown;
+  newValue: unknown;
+  createdAt: string;
+}
+
+export interface TelecallerSubmissionDTO {
+  id: number;
+  referenceNumber: string;
+  sellerName: string;
+  mobileNumber: string;
+  sellerEmail?: string;
+  propertyType: string;
+  location: string;
+  expectedPrice: number | null;
+  propertySize: string | null;
+  status: SubmissionStatusType;
+  contactStatus: 'PENDING' | 'CONTACTED' | 'OVERDUE';
+  submittedAt: string;
+  contactDeadlineAt: string;
+}
+
+export interface PropertyFollowUpDTO {
+  id: number;
+  propertyId: number | null;
+  submissionId: number | null;
+  agentId: number;
+  title: string;
+  activityType: string;
+  scheduledDate: string;
+  scheduledTime: string;
+  notes: string;
+  status: 'PENDING' | 'COMPLETED';
+  completedAt: string | null;
+  createdAt: string;
+}
+
+async function getBearerToken(): Promise<string | null> {
+  const currentUser = auth.currentUser;
+  if (!currentUser) return null;
+  return await currentUser.getIdToken();
+}
+
+async function apiRequest<T>(
+  path: string,
+  options: {
+    method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+    body?: unknown;
+    withAuth?: boolean;
+  } = {}
+): Promise<T> {
+  const { method = 'GET', body, withAuth = true } = options;
+  const headers: Record<string, string> = {};
+
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  if (withAuth) {
+    const token = await getBearerToken();
+    if (!token) {
+      throw new Error('Authentication session required.');
+    }
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`/api${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  const payload = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(payload?.error || `Request failed (${res.status})`) as Error & {
+      status?: number;
+    };
+    err.status = res.status;
+    throw err;
+  }
+  return payload as T;
+}
+
+async function uploadFormDataWithProgress<T>(
+  path: string,
+  formData: FormData,
+  options: { withAuth: boolean; onProgress?: (percent: number) => void }
+): Promise<T> {
+  const token = options.withAuth ? await getBearerToken() : null;
+  if (options.withAuth && !token) {
+    throw new Error('Authentication session required.');
+  }
+
+  return await new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api${path}`);
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable && options.onProgress) {
+        options.onProgress(Math.round((ev.loaded / ev.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      let data: any = {};
+      try {
+        data = JSON.parse(xhr.responseText || '{}');
+      } catch {
+        data = {};
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(data as T);
+      } else {
+        reject(new Error(data?.error || `Upload failed (${xhr.status})`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('Network error during file upload.'));
+    xhr.send(formData);
+  });
+}
+
+export const apiClient = {
+  // Public Endpoints
+  submitPublicProperty: (formData: FormData, onProgress?: (pct: number) => void) =>
+    uploadFormDataWithProgress<PublicSubmissionReceipt>(
+      '/public/property-submissions',
+      formData,
+      { withAuth: false, onProgress }
+    ),
+
+  getPublicProperties: (params: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    propertyType?: string;
+    location?: string;
+    minPrice?: string;
+    maxPrice?: string;
+  }) => {
+    const sp = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== '' && v !== 'All') sp.set(k, String(v));
+    });
+    const qs = sp.toString();
+    return apiRequest<{
+      items: PublicPropertyDTO[];
+      page: number;
+      limit: number;
+      total: number;
+      totalPages: number;
+    }>(`/public/properties${qs ? `?${qs}` : ''}`, { withAuth: false });
+  },
+
+  getPublicPropertyDetail: (idOrCode: string) =>
+    apiRequest<PublicPropertyDTO>(`/public/properties/${encodeURIComponent(idOrCode)}`, {
+      withAuth: false,
+    }),
+
+  // Auth & Notifications
+  getMe: () =>
+    apiRequest<{ user: CRMUserProfile; unreadNotifications: number }>('/auth/me'),
+
+  getNotifications: () =>
+    apiRequest<{ items: NotificationDTO[] }>('/notifications'),
+
+  markNotificationRead: (id: number) =>
+    apiRequest<{ ok: boolean }>(`/notifications/${id}/read`, { method: 'POST' }),
+
+  // Telecaller
+  getTelecallerSubmissions: () =>
+    apiRequest<{ items: TelecallerSubmissionDTO[] }>('/telecaller/submissions'),
+
+  submitTelecallerProperty: (formData: FormData, onProgress?: (pct: number) => void) =>
+    uploadFormDataWithProgress<PublicSubmissionReceipt & { id: number }>(
+      '/telecaller/properties',
+      formData,
+      { withAuth: true, onProgress }
+    ),
+
+  // Admin Submissions
+  getAdminSubmissions: (params: {
+    status?: string;
+    contactStatus?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }) => {
+    const sp = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== '' && v !== 'ALL') sp.set(k, String(v));
+    });
+    const qs = sp.toString();
+    return apiRequest<{
+      summary: SubmissionSummaryStats;
+      total: number;
+      page: number;
+      limit: number;
+      items: SubmissionRecordDTO[];
+    }>(`/admin/property-submissions${qs ? `?${qs}` : ''}`);
+  },
+
+  getAdminSubmissionDetail: (id: number) =>
+    apiRequest<{
+      submission: SubmissionRecordDTO;
+      media: MediaDTO[];
+      history: SubmissionHistoryDTO[];
+    }>(`/admin/property-submissions/${id}`),
+
+  updateAdminSubmission: (id: number, body: Record<string, unknown>) =>
+    apiRequest<{ submission: SubmissionRecordDTO }>(`/admin/property-submissions/${id}`, {
+      method: 'PATCH',
+      body,
+    }),
+
+  approveSubmission: (id: number, notes?: string) =>
+    apiRequest<{ submission: SubmissionRecordDTO }>(
+      `/admin/property-submissions/${id}/approve`,
+      { method: 'POST', body: { notes } }
+    ),
+
+  rejectSubmission: (id: number, reason: string) =>
+    apiRequest<{ submission: SubmissionRecordDTO }>(
+      `/admin/property-submissions/${id}/reject`,
+      { method: 'POST', body: { reason } }
+    ),
+
+  requestSubmissionInfo: (id: number, notes: string) =>
+    apiRequest<{ submission: SubmissionRecordDTO }>(
+      `/admin/property-submissions/${id}/request-information`,
+      { method: 'POST', body: { notes } }
+    ),
+
+  logSubmissionContact: (id: number, method: string, notes: string) =>
+    apiRequest<{ submission: SubmissionRecordDTO }>(
+      `/admin/property-submissions/${id}/log-contact`,
+      { method: 'POST', body: { method, notes } }
+    ),
+
+  convertSubmissionToProperty: (id: number, overrides?: Record<string, unknown>) =>
+    apiRequest<{
+      submission: SubmissionRecordDTO;
+      property: AdminPropertyDTO;
+    }>(`/admin/property-submissions/${id}/convert`, {
+      method: 'POST',
+      body: overrides || {},
+    }),
+
+  // Admin Properties, Publishing, Assignment & Team
+  getAdminProperties: () =>
+    apiRequest<{ items: AdminPropertyDTO[] }>('/admin/properties'),
+
+  updateAdminProperty: (id: number, body: Record<string, unknown>) =>
+    apiRequest<{ property: AdminPropertyDTO }>(`/admin/properties/${id}`, {
+      method: 'PATCH',
+      body,
+    }),
+
+  publishProperty: (id: number, notes?: string) =>
+    apiRequest<{ property: AdminPropertyDTO }>(`/admin/properties/${id}/publish`, {
+      method: 'POST',
+      body: { notes },
+    }),
+
+  unpublishProperty: (id: number, notes?: string) =>
+    apiRequest<{ property: AdminPropertyDTO }>(`/admin/properties/${id}/unpublish`, {
+      method: 'POST',
+      body: { notes },
+    }),
+
+  assignPropertyAgent: (id: number, agentId: number, notes?: string) =>
+    apiRequest<{ property: AdminPropertyDTO }>(`/admin/properties/${id}/assign`, {
+      method: 'POST',
+      body: { agentId, notes },
+    }),
+
+  getPropertyHistory: (id: number) =>
+    apiRequest<{
+      assignments: Array<{
+        id: number;
+        agentId: number;
+        agentName: string;
+        previousAgentName: string | null;
+        assignedByName: string;
+        assignmentStatus: string;
+        notes: string;
+        assignedAt: string;
+      }>;
+      publicationHistory: Array<{
+        id: number;
+        actorName: string;
+        action: string;
+        notes: string;
+        createdAt: string;
+      }>;
+    }>(`/admin/properties/${id}/assignments`),
+
+  uploadPropertyMedia: (
+    propertyId: number,
+    formData: FormData,
+    onProgress?: (pct: number) => void
+  ) =>
+    uploadFormDataWithProgress<{ items: MediaDTO[] }>(
+      `/properties/${propertyId}/media`,
+      formData,
+      { withAuth: true, onProgress }
+    ),
+
+  reorderPropertyMedia: (
+    propertyId: number,
+    payload: { coverMediaId?: number; orderedMediaIds?: number[] }
+  ) =>
+    apiRequest<{ items: MediaDTO[] }>(`/properties/${propertyId}/media/reorder`, {
+      method: 'PATCH',
+      body: payload,
+    }),
+
+  deleteMedia: (mediaId: number) =>
+    apiRequest<{ ok: boolean }>(`/media/${mediaId}`, { method: 'DELETE' }),
+
+  getAdminUsers: () => apiRequest<{ items: TeamMemberDTO[] }>('/admin/users'),
+
+  createAdminUser: (body: {
+    name: string;
+    email: string;
+    phone?: string;
+    role: ServerUserRole;
+    designation?: string;
+  }) => apiRequest<{ user: TeamMemberDTO }>('/admin/users', { method: 'POST', body }),
+
+  updateAdminUser: (
+    id: number,
+    body: { role?: ServerUserRole; active?: boolean; designation?: string }
+  ) =>
+    apiRequest<{ user: TeamMemberDTO }>(`/admin/users/${id}`, {
+      method: 'PATCH',
+      body,
+    }),
+
+  getAuditLogs: () => apiRequest<{ items: AuditLogDTO[] }>('/admin/audit-logs'),
+
+  // Agent Scoped Endpoints
+  getAgentProperties: () =>
+    apiRequest<{ items: AdminPropertyDTO[] }>('/agent/properties'),
+
+  getAgentPropertyDetail: (id: number) =>
+    apiRequest<{
+      property: AdminPropertyDTO;
+      seller: { id: number; name: string; phone: string; whatsapp: string; address: string };
+      media: MediaDTO[];
+      followUps: PropertyFollowUpDTO[];
+    }>(`/agent/properties/${id}`),
+
+  updateAgentProperty: (
+    id: number,
+    body: { status?: string; roadConnectivity?: string; description?: string; internalNotes?: string }
+  ) =>
+    apiRequest<{ property: AdminPropertyDTO }>(`/agent/properties/${id}`, {
+      method: 'PATCH',
+      body,
+    }),
+
+  createAgentFollowUp: (
+    propertyId: number,
+    body: {
+      title: string;
+      activityType: string;
+      scheduledDate: string;
+      scheduledTime: string;
+      notes: string;
+      status?: 'PENDING' | 'COMPLETED';
+    }
+  ) =>
+    apiRequest<{ followUp: PropertyFollowUpDTO }>(
+      `/agent/properties/${propertyId}/follow-ups`,
+      { method: 'POST', body }
+    ),
+
+  updateAgentFollowUp: (
+    followUpId: number,
+    body: { status: 'PENDING' | 'COMPLETED'; notes?: string }
+  ) =>
+    apiRequest<{ followUp: PropertyFollowUpDTO }>(`/agent/follow-ups/${followUpId}`, {
+      method: 'PATCH',
+      body,
+    }),
+};

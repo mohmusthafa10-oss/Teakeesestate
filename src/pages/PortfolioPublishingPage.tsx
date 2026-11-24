@@ -11,6 +11,7 @@ import {
   GlobeLock,
   History,
   ImagePlus,
+  Pencil,
   PhoneCall,
   Search,
   Star,
@@ -45,6 +46,20 @@ export const PortfolioPublishingPage: React.FC<PortfolioPublishingPageProps> = (
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [publishFilter, setPublishFilter] = useState<'ALL' | 'PUBLISHED' | 'UNPUBLISHED'>('ALL');
+  const [agentFilter, setAgentFilter] = useState<string>('ALL');
+
+  // Admin Edit Property Modal
+  const [editProp, setEditProp] = useState<AdminPropertyDTO | null>(null);
+  const [editForm, setEditForm] = useState({
+    title: '',
+    expectedPrice: '',
+    marketPrice: '',
+    location: '',
+    status: 'Available',
+    description: '',
+    internalNotes: '',
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // Confirm publish/unpublish
   const [confirmTarget, setConfirmTarget] = useState<{
@@ -296,9 +311,50 @@ export const PortfolioPublishingPage: React.FC<PortfolioPublishingPageProps> = (
     }
   };
 
+  const openEditProperty = (prop: AdminPropertyDTO) => {
+    setEditProp(prop);
+    setEditForm({
+      title: prop.title,
+      expectedPrice: String(prop.expectedPrice ?? ''),
+      marketPrice: prop.marketPrice ? String(prop.marketPrice) : '',
+      location: prop.location,
+      status: prop.status || 'Available',
+      description: prop.description,
+      internalNotes: prop.internalNotes || '',
+    });
+  };
+
+  const handleSaveAdminEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editProp) return;
+    setSavingEdit(true);
+    try {
+      await apiClient.updateAdminProperty(editProp.id, {
+        title: editForm.title.trim(),
+        expectedPrice: Number(editForm.expectedPrice) || 0,
+        marketPrice: editForm.marketPrice ? Number(editForm.marketPrice) : null,
+        location: editForm.location.trim(),
+        status: editForm.status,
+        description: editForm.description.trim(),
+        internalNotes: editForm.internalNotes.trim(),
+      });
+      notify(`${editProp.code} updated.`, 'success');
+      setEditProp(null);
+      await loadPortfolio();
+    } catch (err: any) {
+      notify(err?.message || 'Unable to update property.', 'error');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const filtered = properties.filter((p) => {
     if (publishFilter === 'PUBLISHED' && !p.isPublished) return false;
     if (publishFilter === 'UNPUBLISHED' && p.isPublished) return false;
+    if (isAdmin && agentFilter !== 'ALL') {
+      if (agentFilter === 'UNASSIGNED' && p.assignedAgentId !== null) return false;
+      if (agentFilter !== 'UNASSIGNED' && String(p.assignedAgentId) !== agentFilter) return false;
+    }
     const q = search.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -337,15 +393,30 @@ export const PortfolioPublishingPage: React.FC<PortfolioPublishingPageProps> = (
           />
         </div>
         {isAdmin && (
-          <select
-            value={publishFilter}
-            onChange={(e) => setPublishFilter(e.target.value as any)}
-            className="h-9 px-3 text-xs bg-[#FFFFFF] border border-[#E5E4DA] rounded-lg"
-          >
-            <option value="ALL">All Visibility States</option>
-            <option value="PUBLISHED">Published Publicly</option>
-            <option value="UNPUBLISHED">Unpublished (Internal Only)</option>
-          </select>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={agentFilter}
+              onChange={(e) => setAgentFilter(e.target.value)}
+              className="h-9 px-3 text-xs bg-[#FFFFFF] border border-[#E5E4DA] rounded-lg"
+            >
+              <option value="ALL">All Salespeople</option>
+              <option value="UNASSIGNED">Unassigned</option>
+              {agents.map((a) => (
+                <option key={a.id} value={String(a.id)}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+            <select
+              value={publishFilter}
+              onChange={(e) => setPublishFilter(e.target.value as any)}
+              className="h-9 px-3 text-xs bg-[#FFFFFF] border border-[#E5E4DA] rounded-lg"
+            >
+              <option value="ALL">All Visibility States</option>
+              <option value="PUBLISHED">Published Publicly</option>
+              <option value="UNPUBLISHED">Unpublished (Internal Only)</option>
+            </select>
+          </div>
         )}
       </div>
 
@@ -381,7 +452,7 @@ export const PortfolioPublishingPage: React.FC<PortfolioPublishingPageProps> = (
                       <Building2 className="w-10 h-10" />
                     </div>
                   )}
-                  <div className="absolute top-3 left-3 flex items-center gap-1.5">
+                  <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1.5">
                     <span className="px-2 py-0.5 rounded bg-[#151D18]/85 text-[#FFFFFF] text-[11px] font-mono">
                       {p.code}
                     </span>
@@ -389,10 +460,20 @@ export const PortfolioPublishingPage: React.FC<PortfolioPublishingPageProps> = (
                       className={`px-2 py-0.5 rounded text-[11px] font-medium border ${
                         p.isPublished
                           ? 'bg-[#E4EBE0] text-[#064E3B] border-[#A8B9A2]'
-                          : 'bg-[#FFFFFF]/95 text-[#77796F] border-[#E5E4DA]'
+                          : p.approvalStatus === 'REJECTED'
+                          ? 'bg-[#C96C60]/15 text-[#9E3E33] border-[#C96C60]/40'
+                          : p.approvalStatus === 'PENDING_REVIEW'
+                          ? 'bg-[#D9AC57]/20 text-[#7A5612] border-[#D9AC57]/40'
+                          : 'bg-[#FFFFFF]/95 text-[#20251F] border-[#E5E4DA]'
                       }`}
                     >
-                      {p.isPublished ? 'PUBLISHED' : 'UNPUBLISHED'}
+                      {p.isPublished
+                        ? 'Published'
+                        : p.approvalStatus === 'REJECTED'
+                        ? 'Rejected'
+                        : p.approvalStatus === 'PENDING_REVIEW'
+                        ? 'Pending Review'
+                        : 'Approved (Unpublished)'}
                     </span>
                   </div>
                 </div>
@@ -444,24 +525,35 @@ export const PortfolioPublishingPage: React.FC<PortfolioPublishingPageProps> = (
                   </button>
 
                   {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => void openAssignModal(p)}
-                      className="h-8 px-2.5 rounded-lg border border-[#E5E4DA] bg-[#FFFFFF] hover:bg-[#E4EBE0]/60 text-[11px] font-medium text-[#20251F] inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      <UserCheck className="w-3.5 h-3.5 text-[#064E3B]" />
-                      Assign
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => openEditProperty(p)}
+                        className="h-8 px-2.5 rounded-lg border border-[#E5E4DA] bg-[#FFFFFF] hover:bg-[#E4EBE0]/60 text-[11px] font-medium text-[#20251F] inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Pencil className="w-3 h-3 text-[#064E3B]" />
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void openAssignModal(p)}
+                        className="h-8 px-2.5 rounded-lg border border-[#E5E4DA] bg-[#FFFFFF] hover:bg-[#E4EBE0]/60 text-[11px] font-medium text-[#20251F] inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <UserCheck className="w-3.5 h-3.5 text-[#064E3B]" />
+                        Assign
+                      </button>
+                    </>
                   )}
 
                   {p.isPublished && onNavigatePath && (
                     <button
                       type="button"
                       onClick={() => onNavigatePath(`/properties/${p.code}`)}
-                      className="h-8 px-2 rounded-lg border border-[#E5E4DA] bg-[#FFFFFF] hover:bg-[#F1F0E8] text-[11px] text-[#064E3B] inline-flex items-center gap-1 cursor-pointer"
+                      className="h-8 px-2.5 rounded-lg border border-[#E5E4DA] bg-[#FFFFFF] hover:bg-[#F1F0E8] text-[11px] font-medium text-[#064E3B] inline-flex items-center gap-1 cursor-pointer"
                       title="View Public Listing"
                     >
-                      <ExternalLink className="w-3.5 h-3.5" />
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Public</span>
                     </button>
                   )}
                 </div>
@@ -865,6 +957,117 @@ export const PortfolioPublishingPage: React.FC<PortfolioPublishingPageProps> = (
               </>
             )}
           </div>
+        )}
+      </Modal>
+
+      {/* Admin Edit Property Modal */}
+      <Modal
+        open={Boolean(editProp)}
+        onClose={() => setEditProp(null)}
+        title={`Edit Property — ${editProp?.code}`}
+        subtitle="Changes save directly to PostgreSQL; published visibility stays unchanged unless explicitly toggled."
+        maxWidthClass="max-w-xl"
+      >
+        {editProp && (
+          <form onSubmit={handleSaveAdminEdit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium mb-1">Property Title *</label>
+              <input
+                type="text"
+                required
+                value={editForm.title}
+                onChange={(e) => setEditForm({ ...editForm, title: e.target.value })}
+                className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium mb-1">Expected Price (₹)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={editForm.expectedPrice}
+                  onChange={(e) => setEditForm({ ...editForm, expectedPrice: e.target.value })}
+                  className="w-full h-9 px-3 text-xs font-mono border border-[#E5E4DA] rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">Market Value (₹)</label>
+                <input
+                  type="number"
+                  min={0}
+                  value={editForm.marketPrice}
+                  onChange={(e) => setEditForm({ ...editForm, marketPrice: e.target.value })}
+                  className="w-full h-9 px-3 text-xs font-mono border border-[#E5E4DA] rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">CRM Status</label>
+                <select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                  className="w-full h-9 px-2.5 text-xs border border-[#E5E4DA] rounded-lg bg-[#FFFFFF]"
+                >
+                  <option value="Available">Available</option>
+                  <option value="Under Negotiation">Under Negotiation</option>
+                  <option value="Reserved">Reserved</option>
+                  <option value="Rented">Rented</option>
+                  <option value="Sold">Sold</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium mb-1">Location *</label>
+              <input
+                type="text"
+                required
+                value={editForm.location}
+                onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
+                className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium mb-1">Public Description *</label>
+              <textarea
+                rows={3}
+                required
+                value={editForm.description}
+                onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
+                className="w-full p-2.5 text-xs border border-[#E5E4DA] rounded-lg"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium mb-1">Internal CRM Notes</label>
+              <input
+                type="text"
+                value={editForm.internalNotes}
+                onChange={(e) => setEditForm({ ...editForm, internalNotes: e.target.value })}
+                className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-[#E5E4DA]">
+              <button
+                type="button"
+                onClick={() => setEditProp(null)}
+                className="h-9 px-4 rounded-lg border border-[#E5E4DA] text-xs font-medium cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={savingEdit}
+                className="h-9 px-4 rounded-lg bg-[#064E3B] hover:bg-[#176B50] disabled:opacity-60 text-[#FFFFFF] text-xs font-medium cursor-pointer"
+              >
+                {savingEdit ? 'Saving...' : 'Save Property Changes'}
+              </button>
+            </div>
+          </form>
         )}
       </Modal>
     </div>

@@ -21,7 +21,7 @@ export function createSeedDatabase(): CRMDatabase {
       {
         id: 'usr-1',
         name: 'Arjun Menon',
-        email: 'admin@testate.in',
+        email: 'arjun@verdantrealty.in',
         phone: '+91 98470 11220',
         role: 'Admin',
         designation: 'Managing Partner',
@@ -32,7 +32,7 @@ export function createSeedDatabase(): CRMDatabase {
       {
         id: 'usr-2',
         name: 'Meera Nair',
-        email: 'agent1@testate.in',
+        email: 'meera@verdantrealty.in',
         phone: '+91 98471 33445',
         role: 'Agent',
         designation: 'Senior Property Advisor',
@@ -43,7 +43,7 @@ export function createSeedDatabase(): CRMDatabase {
       {
         id: 'usr-3',
         name: 'Karthik Varma',
-        email: 'agent2@testate.in',
+        email: 'karthik@verdantrealty.in',
         phone: '+91 97450 88991',
         role: 'Agent',
         designation: 'Land & Investment Specialist',
@@ -54,7 +54,7 @@ export function createSeedDatabase(): CRMDatabase {
       {
         id: 'usr-4',
         name: 'Sana Fathima',
-        email: 'agent3@testate.in',
+        email: 'sana@verdantrealty.in',
         phone: '+91 94460 55219',
         role: 'Agent',
         designation: 'Rentals & Stays Coordinator',

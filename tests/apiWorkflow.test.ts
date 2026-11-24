@@ -161,6 +161,8 @@ test('MediaStorageService validates magic bytes, strips EXIF, generates WebP + t
 
   const saved = await mediaStorage.saveFile(pngPath, '../../evil-path/photo.png');
   assert.equal(saved.mediaCategory, 'PHOTO');
+  assert.equal(saved.width, 640);
+  assert.equal(saved.height, 480);
   assert.ok(saved.thumbnailStorageKey, 'Expected thumbnail storage key for uploaded photo');
   assert.ok(!saved.storageKey.includes('..'));
 
@@ -221,6 +223,7 @@ test('End-to-end submission, approval, unpublished conversion, publishing visibi
   const form = new FormData();
   form.append('sellerName', 'Workflow Test Seller');
   form.append('mobileNumber', uniquePhone);
+  form.append('sellerEmail', 'seller-workflow@example.com');
   form.append('propertyType', 'Villa');
   form.append('location', 'Bekal, Kasaragod');
   form.append('shortDescription', 'Test coastal villa with 20 cents landscaped courtyard.');
@@ -246,7 +249,17 @@ test('End-to-end submission, approval, unpublished conversion, publishing visibi
     .where(eq(propertySubmissions.referenceNumber, receipt.referenceNumber))
     .limit(1);
   assert.ok(subRow);
+  assert.equal(subRow.sellerEmail, 'seller-workflow@example.com');
   createdSubmissionIds.push(subRow.id);
+
+  const [mediaRow] = await db
+    .select()
+    .from(propertyMedia)
+    .where(eq(propertyMedia.submissionId, subRow.id))
+    .limit(1);
+  assert.ok(mediaRow);
+  assert.equal(mediaRow.width, 320);
+  assert.equal(mediaRow.height, 240);
 
   // 3. TELECALLER and AGENT cannot access Admin submissions
   const teleAdminAttempt = await fetch(`${baseUrl}/admin/property-submissions`, {
@@ -311,9 +324,16 @@ test('End-to-end submission, approval, unpublished conversion, publishing visibi
   createdPropertyIds.push(propId);
   createdSellerIds.push(converted.property.sellerId);
 
-  // Must start unpublished
+  // Must start unpublished and propagate seller email
   assert.equal(converted.property.isPublished, false);
   assert.equal(converted.property.approvalStatus, 'APPROVED');
+
+  const [sellerRow] = await db
+    .select()
+    .from(sellers)
+    .where(eq(sellers.id, converted.property.sellerId))
+    .limit(1);
+  assert.equal(sellerRow?.email, 'seller-workflow@example.com');
 
   // Duplicate conversion must return 409 Conflict
   const dupConvert = await fetch(
@@ -368,11 +388,59 @@ test('End-to-end submission, approval, unpublished conversion, publishing visibi
   const publicJson = (await publicDetailRes.json()) as Record<string, unknown>;
   assert.equal(publicJson.code, propCode);
   assert.equal('sellerPhone' in publicJson, false, 'Public DTO must never expose sellerPhone');
+  assert.equal('sellerEmail' in publicJson, false, 'Public DTO must never expose sellerEmail');
   assert.equal('sellerName' in publicJson, false, 'Public DTO must never expose sellerName');
   assert.equal('internalNotes' in publicJson, false, 'Public DTO must never expose internalNotes');
   assert.equal('assignedAgentId' in publicJson, false, 'Public DTO must never expose agent ID');
 
-  // 9. Admin unpublishes -> hidden from public immediately while retained in CRM
+  // 9. Admin edits property and reassigns from Agent 1 to Agent 2 with history tracking
+  const patchRes = await fetch(`${baseUrl}/admin/properties/${propId}`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: 'Bearer tok-admin',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ title: 'Updated Coastal Villa Bekal', expectedPrice: 8900000 }),
+  });
+  assert.equal(patchRes.status, 200);
+  const patchedJson = (await patchRes.json()) as any;
+  assert.equal(patchedJson.property.title, 'Updated Coastal Villa Bekal');
+
+  const [agent2] = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, 'test-agent2@teakees.in'))
+    .limit(1);
+
+  const reassignRes = await fetch(`${baseUrl}/admin/properties/${propId}/assign`, {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer tok-admin',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ agentId: agent2.id, notes: 'Reassign to Bekal specialist' }),
+  });
+  assert.equal(reassignRes.status, 200);
+
+  const agent1OldAccess = await fetch(`${baseUrl}/agent/properties/${propId}`, {
+    headers: { Authorization: 'Bearer tok-agent1' },
+  });
+  assert.equal(agent1OldAccess.status, 403);
+
+  const agent2NewAccess = await fetch(`${baseUrl}/agent/properties/${propId}`, {
+    headers: { Authorization: 'Bearer tok-agent2' },
+  });
+  assert.equal(agent2NewAccess.status, 200);
+
+  const historyRes = await fetch(`${baseUrl}/admin/properties/${propId}/assignments`, {
+    headers: { Authorization: 'Bearer tok-admin' },
+  });
+  assert.equal(historyRes.status, 200);
+  const historyJson = (await historyRes.json()) as any;
+  assert.ok(historyJson.assignments.length >= 2);
+  assert.ok(historyJson.publicationHistory.length >= 1);
+
+  // 10. Admin unpublishes -> hidden from public immediately while retained in CRM
   const unpublishRes = await fetch(`${baseUrl}/admin/properties/${propId}/unpublish`, {
     method: 'POST',
     headers: { Authorization: 'Bearer tok-admin' },
@@ -381,4 +449,34 @@ test('End-to-end submission, approval, unpublished conversion, publishing visibi
 
   const pubAfterUnpub = await fetch(`${baseUrl}/public/properties/${propCode}`);
   assert.equal(pubAfterUnpub.status, 404);
+
+  // 11. Telecaller creates submission and sees ONLY their own submissions
+  const teleForm = new FormData();
+  teleForm.append('sellerName', 'Telecaller Intake Owner');
+  teleForm.append('mobileNumber', `+91 98${Date.now().toString().slice(-8)}`);
+  teleForm.append('sellerEmail', 'tele-owner@example.com');
+  teleForm.append('propertyType', 'Land');
+  teleForm.append('location', 'Kanhangad, Kasaragod');
+  teleForm.append('shortDescription', 'Telecaller verified 15 cents residential plot.');
+
+  const teleCreateRes = await fetch(`${baseUrl}/telecaller/properties`, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer tok-tele' },
+    body: teleForm,
+  });
+  assert.equal(teleCreateRes.status, 201);
+  const teleCreated = (await teleCreateRes.json()) as any;
+  createdSubmissionIds.push(teleCreated.id);
+
+  const teleListRes = await fetch(`${baseUrl}/telecaller/submissions`, {
+    headers: { Authorization: 'Bearer tok-tele' },
+  });
+  assert.equal(teleListRes.status, 200);
+  const teleList = (await teleListRes.json()) as { items: Array<{ id: number; sellerEmail?: string }> };
+  assert.ok(teleList.items.some((item) => item.id === teleCreated.id));
+  assert.equal(
+    teleList.items.some((item) => item.id === subRow.id),
+    false,
+    'Telecaller must not see public or other users submissions'
+  );
 });

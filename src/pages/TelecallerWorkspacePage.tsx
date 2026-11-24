@@ -53,6 +53,7 @@ export const TelecallerWorkspacePage: React.FC<TelecallerWorkspacePageProps> = (
 
   const [sellerName, setSellerName] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
+  const [sellerEmail, setSellerEmail] = useState('');
   const [propertyType, setPropertyType] = useState('House');
   const [location, setLocation] = useState('');
   const [shortDescription, setShortDescription] = useState('');
@@ -107,7 +108,7 @@ export const TelecallerWorkspacePage: React.FC<TelecallerWorkspacePageProps> = (
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         file,
         category: isVideo ? 'VIDEO' : 'PHOTO',
-        previewUrl: isPhoto ? URL.createObjectURL(file) : null,
+        previewUrl: URL.createObjectURL(file),
       });
     });
     if (next.length > 0) setMediaQueue((prev) => [...prev, ...next]);
@@ -129,6 +130,7 @@ export const TelecallerWorkspacePage: React.FC<TelecallerWorkspacePageProps> = (
     const fd = new FormData();
     fd.append('sellerName', sellerName.trim());
     fd.append('mobileNumber', mobileNumber.trim());
+    if (sellerEmail.trim()) fd.append('sellerEmail', sellerEmail.trim());
     fd.append('propertyType', propertyType);
     fd.append('location', location.trim());
     fd.append('shortDescription', shortDescription.trim());
@@ -151,6 +153,7 @@ export const TelecallerWorkspacePage: React.FC<TelecallerWorkspacePageProps> = (
       );
       setSellerName('');
       setMobileNumber('');
+      setSellerEmail('');
       setLocation('');
       setShortDescription('');
       setExpectedPrice('');
@@ -352,17 +355,31 @@ export const TelecallerWorkspacePage: React.FC<TelecallerWorkspacePageProps> = (
               </div>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-medium text-[#77796F] mb-1">
-                Telecaller Notes (Optional)
-              </label>
-              <input
-                type="text"
-                value={additionalNotes}
-                onChange={(e) => setAdditionalNotes(e.target.value)}
-                placeholder="Seller callback preference or call verification notes..."
-                className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] font-medium text-[#77796F] mb-1">
+                  Seller Email (Optional)
+                </label>
+                <input
+                  type="email"
+                  value={sellerEmail}
+                  onChange={(e) => setSellerEmail(e.target.value)}
+                  placeholder="owner@example.com"
+                  className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-medium text-[#77796F] mb-1">
+                  Telecaller Notes (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={additionalNotes}
+                  onChange={(e) => setAdditionalNotes(e.target.value)}
+                  placeholder="Seller callback preference or call verification notes..."
+                  className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg"
+                />
+              </div>
             </div>
 
             <div className="pt-2 space-y-3">
@@ -439,6 +456,14 @@ export const TelecallerWorkspacePage: React.FC<TelecallerWorkspacePageProps> = (
                           src={m.previewUrl}
                           alt={m.file.name}
                           className="w-full h-16 object-cover"
+                        />
+                      ) : m.previewUrl ? (
+                        <video
+                          src={m.previewUrl}
+                          controls
+                          muted
+                          preload="metadata"
+                          className="w-full h-16 object-cover bg-[#151D18]"
                         />
                       ) : (
                         <div className="w-full h-16 bg-[#151D18] text-[#E4EBE0] flex items-center justify-center">
