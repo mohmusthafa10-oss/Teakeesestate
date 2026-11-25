@@ -39,38 +39,61 @@ async def lifespan(app: FastAPI):
 
     # Startup: ensure tables exist
     Base.metadata.create_all(bind=engine)
-    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    # Ensure public upload directory exists (static files are served only from PUBLIC_UPLOAD_DIR)
+    os.makedirs(settings.PUBLIC_UPLOAD_DIR, exist_ok=True)
 
-    # Seed initial Admin and SequenceCounters if database is empty
+    # Seed initial admin and agent users from environment variables (only in development)
+    # This avoids hard‑coded credentials in production. The seeding runs only when the
+    # database is empty and the required environment variables are present.
+    from os import getenv
     db = SessionLocal()
     try:
-        admin_user = db.query(User).filter(User.id == "usr-1").first()
-        if not admin_user:
-            admin_user = User(
-                id="usr-1",
+        # Helper to create a user if not existing
+        def create_user_if_missing(user_id: str, name: str, email_env: str, phone: str, password_env: str, role: str, designation: str):
+            existing = db.query(User).filter(User.id == user_id).first()
+            if existing:
+                return
+            email = getenv(email_env)
+            password = getenv(password_env)
+            if not email or not password:
+                # In production we abort seeding; in development we can skip silently.
+                if settings.ENVIRONMENT == "production":
+                    raise RuntimeError(
+                        f"Missing environment variables for seeding user {user_id}: {email_env} and/or {password_env}"
+                    )
+                return
+            user = User(
+                id=user_id,
+                name=name,
+                email=email,
+                phone=phone,
+                password_hash=get_password_hash(password),
+                role=role,
+                designation=designation,
+                active=True,
+            )
+            db.add(user)
+
+        # Only seed when in non‑production environments
+        if settings.ENVIRONMENT != "production":
+            create_user_if_missing(
+                user_id="usr-1",
                 name="Arjun Menon",
-                email="admin@testate.in",
+                email_env="ADMIN_SEED_EMAIL",
                 phone="+91 98470 11220",
-                password_hash=get_password_hash("admin123"),
+                password_env="ADMIN_SEED_PASSWORD",
                 role="Admin",
                 designation="Managing Partner",
-                active=True,
             )
-            db.add(admin_user)
-
-        agent_user = db.query(User).filter(User.id == "usr-2").first()
-        if not agent_user:
-            agent_user = User(
-                id="usr-2",
+            create_user_if_missing(
+                user_id="usr-2",
                 name="Meera Nair",
-                email="agent1@testate.in",
+                email_env="AGENT_SEED_EMAIL",
                 phone="+91 98471 33445",
-                password_hash=get_password_hash("agent123"),
+                password_env="AGENT_SEED_PASSWORD",
                 role="Agent",
                 designation="Senior Property Advisor",
-                active=True,
             )
-            db.add(agent_user)
 
         # Initialize sequence counters if missing
         prefixes = [("TAK", 8), ("SLR", 1004), ("LED", 1008), ("DL", 1006), ("ADV", 1002), ("INV", 1003), ("RNT", 1003)]
@@ -102,8 +125,9 @@ app.add_middleware(
 )
 
 # Static file serving for uploads
-os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
+# Ensure public upload directory exists (static files are served only from PUBLIC_UPLOAD_DIR)
+os.makedirs(settings.PUBLIC_UPLOAD_DIR, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.PUBLIC_UPLOAD_DIR), name="uploads")
 
 # Include all API routers
 app.include_router(auth.router)

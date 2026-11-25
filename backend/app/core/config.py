@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Teakees Real Estate CRM"
     ENVIRONMENT: str = "development"
-    SECRET_KEY: str = "teakees-crm-super-secure-production-ready-jwt-secret-key-2026"
+    # SECRET_KEY must be provided via environment in production; no safe default.
+    SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -20,9 +21,13 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
     ]
 
+    PUBLIC_UPLOAD_DIR: str = "./uploads/public"
+    PRIVATE_UPLOAD_DIR: str = "./uploads/private"
+    # Base upload directory used for static file serving (public files). Private files are stored separately.
     UPLOAD_DIR: str = "./uploads"
+    # SECRET_KEY must be provided via environment in production; no safe default.
+    SECRET_KEY: str = ""
 
-    # Mail & Password Reset Settings
     MAIL_USERNAME: str = "admin@testate.in"
     MAIL_PASSWORD: str = ""
     MAIL_FROM: str = "admin@testate.in"
@@ -36,15 +41,17 @@ class Settings(BaseSettings):
 
     @field_validator("SECRET_KEY")
     def validate_production_secret(cls, v: str, info) -> str:
-        # In production, disallow development fallback keys
+        # In production, a secret key must be explicitly set and be strong.
         env = os.getenv("ENVIRONMENT", "").lower()
         if env == "production":
-            if not v or "replace" in v.lower() or "secret-key-2026" in v.lower():
+            if not v:
+                raise ValueError("FATAL SECURITY CONFIGURATION: SECRET_KEY must be set in production environment.")
+            if len(v) < 32:
+                raise ValueError("SECRET_KEY must be at least 32 characters long in production.")
+            if "replace" in v.lower() or "secret-key-2026" in v.lower():
                 raise ValueError(
                     "FATAL SECURITY CONFIGURATION: In production mode, a cryptographically random SECRET_KEY must be provided in the environment. Development fallback secrets are strictly prohibited."
                 )
-            if len(v) < 32:
-                raise ValueError("SECRET_KEY must be at least 32 characters long in production.")
         return v
 
     @field_validator("CORS_ORIGINS", mode="before")
