@@ -2,7 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Optional
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_permission
+from app.api.deps import (
+    check_reassignment_permission,
+    check_record_access,
+    require_permission,
+)
 from app.core.permissions import Permission
 from app.database.session import get_db
 from app.models.models import (
@@ -28,10 +32,15 @@ def list_submissions(
     seller_name: Optional[str] = Query(None, description="Search by seller name"),
     phone: Optional[str] = Query(None, description="Search by phone"),
     db: Session = Depends(get_db),
-    permission: Permission = Depends(require_permission(Permission.SUBMISSIONS_READ.value)),
+    current_user: User = Depends(require_permission(Permission.SUBMISSIONS_READ.value)),
 ):
-    """List submissions with optional filters (admin view)."""
+    """List submissions with optional filters (admin view or scoped to agent/telecaller)."""
     query = db.query(PropertySubmission)
+    if current_user.role == "Telecaller":
+        query = query.filter(PropertySubmission.created_by_user_id == current_user.id)
+    elif current_user.role == "Agent":
+        query = query.filter(PropertySubmission.assigned_agent_id == current_user.id)
+
     if status_filter:
         query = query.filter(PropertySubmission.status == status_filter)
     if reference:
@@ -60,9 +69,10 @@ def list_submissions(
 def get_submission_detail(
     submission_id: str,
     db: Session = Depends(get_db),
-    permission: Permission = Depends(require_permission(Permission.SUBMISSIONS_READ.value)),
+    current_user: User = Depends(require_permission(Permission.SUBMISSIONS_READ.value)),
 ):
     sub = _get_submission(db, submission_id)
+    check_record_access(sub, current_user, owner_field="assigned_agent_id", creator_field="created_by_user_id")
     media = (
         db.query(SubmissionMedia)
         .filter(SubmissionMedia.submission_id == submission_id)
@@ -102,10 +112,12 @@ def update_submission(
     submission_id: str,
     updates: dict,
     db: Session = Depends(get_db),
-    permission: Permission = Depends(require_permission(Permission.SUBMISSIONS_UPDATE.value)),
+    current_user: User = Depends(require_permission(Permission.SUBMISSIONS_UPDATE.value)),
 ):
     """Partial update of mutable fields (notes, assigned agent, etc.)."""
     sub = _get_submission(db, submission_id)
+    check_record_access(sub, current_user, owner_field="assigned_agent_id", creator_field="created_by_user_id")
+    check_reassignment_permission(updates, current_user)
     allowed_fields = {"notes", "assigned_agent_id"}
     for key, value in updates.items():
         if key in allowed_fields:

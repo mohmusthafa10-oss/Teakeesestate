@@ -37,21 +37,6 @@ class Settings(BaseSettings):
     USE_CREDENTIALS: bool = False
     FRONTEND_URL: str = "http://localhost:3000"
 
-    @field_validator("SECRET_KEY")
-    def validate_production_secret(cls, v: str, info) -> str:
-        # In production, a secret key must be explicitly set and be strong.
-        env = os.getenv("ENVIRONMENT", "").lower()
-        if env == "production":
-            if not v:
-                raise ValueError("FATAL SECURITY CONFIGURATION: SECRET_KEY must be set in production environment.")
-            if len(v) < 32:
-                raise ValueError("SECRET_KEY must be at least 32 characters long in production.")
-            if "replace" in v.lower() or "secret-key-2026" in v.lower():
-                raise ValueError(
-                    "FATAL SECURITY CONFIGURATION: In production mode, a cryptographically random SECRET_KEY must be provided in the environment. Development fallback secrets are strictly prohibited."
-                )
-        return v
-
     @field_validator("CORS_ORIGINS", mode="before")
     def assemble_cors_origins(cls, v: Union[str, List[str]]) -> List[str]:
         if isinstance(v, str):
@@ -65,6 +50,30 @@ class Settings(BaseSettings):
         elif isinstance(v, list):
             return v
         return ["*"]
+
+    @property
+    def is_production(self) -> bool:
+        return (self.ENVIRONMENT or "").lower() == "production"
+
+    from pydantic import model_validator
+
+    @model_validator(mode="after")
+    def validate_production_secret(self) -> "Settings":
+        env = (self.ENVIRONMENT or "").lower()
+        if env == "production":
+            if not self.SECRET_KEY or not self.SECRET_KEY.strip():
+                raise ValueError("FATAL SECURITY CONFIGURATION: SECRET_KEY must be set in production environment.")
+            if len(self.SECRET_KEY) < 32:
+                raise ValueError("FATAL SECURITY CONFIGURATION: SECRET_KEY must be at least 32 characters long in production.")
+            weak_keywords = ["replace", "secret-key-2026", "secret", "password", "changeme", "admin123"]
+            if any(weak in self.SECRET_KEY.lower() for weak in weak_keywords):
+                raise ValueError(
+                    "FATAL SECURITY CONFIGURATION: In production mode, a cryptographically random SECRET_KEY must be provided in the environment. Weak or development fallback secrets are strictly prohibited."
+                )
+        elif not self.SECRET_KEY and env in ("development", "testing"):
+            # Safe predictable key for development / testing when env var omitted
+            self.SECRET_KEY = "dev-secret-key-for-local-development-testing-purposes-min32chars"
+        return self
 
     model_config = SettingsConfigDict(
         env_file=(

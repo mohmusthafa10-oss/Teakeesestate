@@ -44,7 +44,10 @@ def sales_report(
     current_user: User = Depends(require_permission("reports.read")),
     db: Session = Depends(get_db),
 ):
-    deals = db.query(Deal).filter(Deal.status == "Closed").all()
+    query = db.query(Deal).filter(Deal.status == "Closed")
+    if current_user.role == "Agent":
+        query = query.filter(Deal.assigned_agent_id == current_user.id)
+    deals = query.all()
     total_sales = sum(d.agreed_price for d in deals)
     total_commission = sum(d.commission_amount for d in deals)
 

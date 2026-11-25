@@ -3,7 +3,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_active_user, require_permission
+from app.api.deps import (
+    check_reassignment_permission,
+    check_record_access,
+    get_current_active_user,
+    require_permission,
+)
 from app.database.session import get_db
 from app.models.models import SiteVisit, User
 from app.schemas.schemas import SiteVisitCreate, SiteVisitResponse, SiteVisitUpdate
@@ -18,6 +23,8 @@ def get_site_visits(
     db: Session = Depends(get_db),
 ):
     query = db.query(SiteVisit)
+    if current_user.role == "Agent":
+        query = query.filter(SiteVisit.agent_id == current_user.id)
     if property_id:
         query = query.filter(SiteVisit.property_id == property_id)
     if lead_id:
@@ -30,6 +37,11 @@ def create_visit(
     current_user: User = Depends(require_permission("site_visits.manage")),
     db: Session = Depends(get_db),
 ):
+    if current_user.role == "Agent" and data.agent_id and data.agent_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Cannot assign visit to another agent",
+        )
     visit = SiteVisit(
         id=str(uuid.uuid4()),
         property_id=data.property_id,
@@ -57,6 +69,8 @@ def update_visit(
     visit = db.query(SiteVisit).filter(SiteVisit.id == id).first()
     if not visit:
         raise HTTPException(status_code=404, detail="Site visit not found")
+    check_record_access(visit, current_user, owner_field="agent_id")
+    check_reassignment_permission(data, current_user)
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(visit, k, v)
     db.commit()

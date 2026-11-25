@@ -39,7 +39,7 @@ class ChangePasswordRequest(BaseModel):
 class UserBase(BaseModel):
     name: str
     email: EmailStr
-    phone: str
+    phone: Optional[str] = None
     role: str = "Agent"
     designation: Optional[str] = "Property Advisor"
     active: bool = True

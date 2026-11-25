@@ -4,7 +4,19 @@ import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 
+import re
 from app.core.config import settings
+
+def validate_admin_password_strength(password: str) -> bool:
+    if len(password) < 12:
+        raise ValueError("Admin password must be at least 12 characters long.")
+    if not re.search(r"[A-Z]", password):
+        raise ValueError("Admin password must contain at least one uppercase letter.")
+    if not re.search(r"[a-z]", password):
+        raise ValueError("Admin password must contain at least one lowercase letter.")
+    if not re.search(r"[0-9]", password):
+        raise ValueError("Admin password must contain at least one number.")
+    return True
 
 ph = PasswordHasher(
     time_cost=2,

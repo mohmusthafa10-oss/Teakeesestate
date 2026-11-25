@@ -72,6 +72,20 @@ def setup_test_db():
             )
             db.add(agent2)
 
+        telecaller = db.query(User).filter(User.id == "test-telecaller-1").first()
+        if not telecaller:
+            telecaller = User(
+                id="test-telecaller-1",
+                name="Test Telecaller",
+                email="telecaller@test.com",
+                phone="+91 99999 44444",
+                password_hash=get_password_hash("password123"),
+                role="Telecaller",
+                designation="Telecaller",
+                active=True,
+            )
+            db.add(telecaller)
+
         # Standard testate.in multi-agent accounts for isolation test suites
         testate_accounts = [
             ("usr-admin-testate", "Admin Testate", "admin@testate.in", "admin123", "Admin"),
@@ -175,6 +189,14 @@ def agent2_token() -> str:
 @pytest.fixture
 def agent2_headers(agent2_token) -> dict:
     return {"Authorization": f"Bearer {agent2_token}"}
+
+@pytest.fixture
+def telecaller_token() -> str:
+    return create_access_token(subject="test-telecaller-1", extra_claims={"role": "Telecaller", "email": "telecaller@test.com"})
+
+@pytest.fixture
+def telecaller_headers(telecaller_token) -> dict:
+    return {"Authorization": f"Bearer {telecaller_token}"}
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_uploads():

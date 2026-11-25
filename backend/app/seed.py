@@ -7,6 +7,7 @@ from decimal import Decimal
 # Add backend directory to sys.path
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
+from app.core.config import settings
 from app.core.security import get_password_hash
 from app.database.base import Base
 from app.database.session import SessionLocal, engine
@@ -31,8 +32,10 @@ from app.models.models import (
 )
 
 def run_seed():
-    print("Initializing database tables...")
-    Base.metadata.create_all(bind=engine)
+    if settings.is_production:
+        raise RuntimeError("CRITICAL SECURITY ERROR: Database seeding is strictly forbidden in production.")
+
+    print("Checking database tables...")
     db = SessionLocal()
 
     try:
@@ -43,13 +46,23 @@ def run_seed():
             return
 
         print("Seeding Users...")
+        admin_pwd = os.getenv("SEED_ADMIN_PASSWORD")
+        agent_pwd = os.getenv("SEED_AGENT_PASSWORD")
+        if not admin_pwd or not agent_pwd:
+            raise RuntimeError(
+                "SEED_ADMIN_PASSWORD and SEED_AGENT_PASSWORD environment variables must be provided for database seeding. "
+                "Hardcoded fallback credentials are strictly prohibited."
+            )
+        from app.core.security import validate_admin_password_strength
+        validate_admin_password_strength(admin_pwd)
+
         users = [
             User(
                 id="usr-1",
                 name="Admin User",
                 email="admin@testate.in",
                 phone="+91 98470 11220",
-                password_hash=get_password_hash("admin123"),
+                password_hash=get_password_hash(admin_pwd),
                 role="Admin",
                 designation="Managing Partner",
                 active=True,
@@ -59,7 +72,7 @@ def run_seed():
                 name="Meera Nair",
                 email="agent1@testate.in",
                 phone="+91 98471 33445",
-                password_hash=get_password_hash("agent123"),
+                password_hash=get_password_hash(agent_pwd),
                 role="Agent",
                 designation="Senior Property Advisor",
                 active=True,
@@ -69,7 +82,7 @@ def run_seed():
                 name="Karthik Varma",
                 email="agent2@testate.in",
                 phone="+91 97450 88991",
-                password_hash=get_password_hash("agent123"),
+                password_hash=get_password_hash(agent_pwd),
                 role="Agent",
                 designation="Land & Investment Specialist",
                 active=True,
@@ -79,7 +92,7 @@ def run_seed():
                 name="Sana Fathima",
                 email="agent3@testate.in",
                 phone="+91 94460 55219",
-                password_hash=get_password_hash("agent123"),
+                password_hash=get_password_hash(agent_pwd),
                 role="Agent",
                 designation="Rentals & Stays Coordinator",
                 active=True,

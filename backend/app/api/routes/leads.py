@@ -2,7 +2,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_active_user, require_permission
+from app.api.deps import (
+    check_reassignment_permission,
+    check_record_access,
+    get_current_active_user,
+    require_permission,
+)
 from app.database.session import get_db
 from app.models.models import User
 from app.schemas.schemas import LeadCreate, LeadResponse, LeadUpdate, PaginatedResponse
@@ -41,6 +46,7 @@ def get_lead_by_id(
     lead = get_lead(db, id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    check_record_access(lead, current_user)
     return lead
 
 @router.put("/{id}", response_model=LeadResponse)
@@ -50,9 +56,12 @@ def update_lead_by_id(
     current_user: User = Depends(require_permission("leads.update")),
     db: Session = Depends(get_db),
 ):
-    lead = update_lead(db, id, data, current_user.id)
+    lead = get_lead(db, id)
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
+    check_record_access(lead, current_user)
+    check_reassignment_permission(data, current_user)
+    lead = update_lead(db, id, data, current_user.id)
     return lead
 
 @router.get("/{id}/matches")
@@ -61,5 +70,9 @@ def get_matches_for_lead(
     current_user: User = Depends(require_permission("leads.read")),
     db: Session = Depends(get_db),
 ):
+    lead = get_lead(db, id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    check_record_access(lead, current_user)
     return find_matching_properties(db, id)
 

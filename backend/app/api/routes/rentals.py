@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, require_permission
 from app.database.session import get_db
-from app.models.models import RentalBooking, User
+from app.models.models import Property, RentalBooking, User
 from app.schemas.schemas import RentalBookingCreate, RentalBookingResponse, RentalBookingUpdate
 from app.services.services import generate_sequential_code
 
@@ -28,6 +28,13 @@ def create_rental_booking(
     current_user: User = Depends(require_permission("properties.create")),
     db: Session = Depends(get_db),
 ):
+    if current_user.role == "Agent":
+        prop = db.query(Property).filter(Property.id == data.property_id).first()
+        if prop and prop.assigned_agent_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: Cannot book rental for another agent's property",
+            )
     code = generate_sequential_code(db, "RNT", pad=4, start=1001)
     booking = RentalBooking(
         id=str(uuid.uuid4()),
@@ -60,6 +67,13 @@ def update_rental_booking(
     booking = db.query(RentalBooking).filter(RentalBooking.id == id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
+    if current_user.role == "Agent":
+        prop = db.query(Property).filter(Property.id == booking.property_id).first()
+        if prop and prop.assigned_agent_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: Rental booking is for another agent's property",
+            )
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(booking, k, v)
     db.commit()

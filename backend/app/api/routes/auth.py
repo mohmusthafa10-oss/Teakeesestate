@@ -147,6 +147,12 @@ async def request_password_reset(
     # Find user (case‑insensitive) – do not reveal existence
     user = db.query(User).filter(User.email == payload.email.strip().lower()).first()
     if user:
+        # Invalidate any previously unconsumed tokens for this user
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.used.is_(False),
+        ).update({"used": True})
+
         raw_token = secrets.token_hex(32)
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
         expires_at = datetime.utcnow() + timedelta(minutes=15)
@@ -182,8 +188,23 @@ def reset_password(
     user = db.get(User, reset_record.user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if user.role == "Admin":
+        from app.core.security import validate_admin_password_strength
+        try:
+            validate_admin_password_strength(payload.new_password)
+        except ValueError as ve:
+            raise HTTPException(status_code=400, detail=str(ve))
+    elif len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters long.")
+
     user.password_hash = get_password_hash(payload.new_password)
     reset_record.used = True
+    # Invalidate any other tokens for this user
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id,
+        PasswordResetToken.used.is_(False),
+    ).update({"used": True})
     db.commit()
     return {"message": "Password has been reset successfully."}
 

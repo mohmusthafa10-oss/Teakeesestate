@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_active_user, require_permission
+from app.api.deps import (
+    check_reassignment_permission,
+    check_record_access,
+    get_current_active_user,
+    require_permission,
+)
 from app.core.permissions import Permission
 from app.database.session import get_db
 from app.models.models import PriceHistory, Property, PropertyMatch, PropertyPublication, User
@@ -82,11 +87,7 @@ def get_property_by_id(
     prop = get_property(db, id)
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
-    if current_user.role == "Agent" and prop.assigned_agent_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to access properties assigned to other agents",
-        )
+    check_record_access(prop, current_user)
     prop.days_listed = calculate_days_listed(prop.listed_date, prop.created_at)
     return prop
 
@@ -101,11 +102,8 @@ def update_property_by_id(
     prop = get_property(db, id)
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
-    if current_user.role == "Agent" and prop.assigned_agent_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to modify properties assigned to other agents",
-        )
+    check_record_access(prop, current_user)
+    check_reassignment_permission(data, current_user)
     prop = update_property(db, id, data, current_user.id)
     return prop
 
@@ -208,6 +206,7 @@ def get_property_publication_status(
     prop = get_property(db, id)
     if not prop:
         raise HTTPException(status_code=404, detail="Property not found")
+    check_record_access(prop, current_user)
     pub = db.query(PropertyPublication).filter(PropertyPublication.property_id == id).first()
     return {
         "property_id": id,
@@ -223,6 +222,10 @@ def get_leads_for_property(
     current_user: User = Depends(require_permission("properties.read")),
     db: Session = Depends(get_db),
 ):
+    prop = get_property(db, id)
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    check_record_access(prop, current_user)
     return find_matching_leads(db, id)
 
 
@@ -232,5 +235,9 @@ def get_property_price_history(
     current_user: User = Depends(require_permission("properties.read")),
     db: Session = Depends(get_db),
 ):
+    prop = get_property(db, id)
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    check_record_access(prop, current_user)
     return db.query(PriceHistory).filter(PriceHistory.property_id == id).order_by(PriceHistory.created_at.desc()).all()
 
