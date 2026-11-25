@@ -152,35 +152,69 @@ def convert_submission(
     current_user: User = Depends(require_permission(Permission.SUBMISSIONS_APPROVE.value)),
 ):
     sub = _get_submission(db, submission_id)
+    if sub.status == SubmissionStatus.CONVERTED.value:
+        raise HTTPException(status_code=400, detail="Submission has already been converted")
     if sub.status != SubmissionStatus.APPROVED.value:
         raise HTTPException(status_code=400, detail="Only approved submissions can be converted")
-    # Create a Property record based on submission data (simplified)
-    from app.models.models import Property, PropertyImage
-    # Generate a unique property code – using same logic as existing seed
-    import uuid
-    prop_code = f"PROP-{uuid.uuid4().hex[:6].upper()}"
+
+    from decimal import Decimal
+    from app.models.models import Property, PropertyImage, PropertyPublication
+    from app.services.services import generate_sequential_code, log_activity
+
+    try:
+        prop_code = generate_sequential_code(db, "TAK", pad=3, start=1)
+    except Exception:
+        import uuid
+        prop_code = f"TAK{uuid.uuid4().hex[:4].upper()}"
+
+    area_val = Decimal(str(sub.size)) if sub.size is not None else Decimal("0")
+    price_val = Decimal(str(sub.expected_price)) if sub.expected_price is not None else Decimal("0")
+
     prop = Property(
         code=prop_code,
-        title=sub.description or "Untitled Property",
-        type=sub.type,
-        category="Residential",  # default – could be derived later
-        district=sub.location,
-        expected_price=sub.expected_price or 0,
-        seller_id=None,  # No actual seller record yet; could be linked later
+        title=sub.description[:100] if sub.description else f"{sub.type} in {sub.location}",
+        type=sub.type or "House",
+        category="Residential",
+        district=sub.location or "Wayanad",
+        panchayath=sub.location or "Kalpetta",
+        locality=sub.location,
+        area_value=area_val,
+        area_unit="Cents",
+        expected_price=price_val,
+        description=sub.description or "",
+        status="Active",
+        assigned_agent_id=sub.assigned_agent_id,
+        seller_id=None,
     )
     db.add(prop)
-    db.flush()  # obtain prop.id
-    # Move media entries: link them as PropertyImage records (reuse storage_key as url)
-    media_items = db.query(SubmissionMedia).filter(SubmissionMedia.submission_id == sub.id).all()
-    for m in media_items:
+    db.flush()
+
+    # Move media entries: link them as PropertyImage records
+    media_items = db.query(SubmissionMedia).filter(SubmissionMedia.submission_id == sub.id).order_by(SubmissionMedia.order).all()
+    for idx, m in enumerate(media_items):
         img = PropertyImage(
             property_id=prop.id,
             url=f"/uploads/{m.storage_key}",
-            caption=m.original_filename,
-            is_primary=False,
+            caption=m.original_filename or f"Image {idx + 1}",
+            is_primary=(idx == 0),
         )
         db.add(img)
+
+    # Initialize PropertyPublication record
+    publication = PropertyPublication(
+        property_id=prop.id,
+        is_published=False,
+    )
+    db.add(publication)
+
     # Mark submission as converted
     _transition_status(db, sub, SubmissionStatus.CONVERTED.value, current_user)
+    log_activity(db, "Property", prop.id, "Converted", f"Property {prop.code} converted from submission {sub.reference}", current_user.id)
     db.commit()
-    return {"detail": "Submission converted to property", "property_id": prop.id, "property_code": prop.code}
+    db.refresh(prop)
+
+    return {
+        "detail": "Submission converted to property",
+        "property_id": prop.id,
+        "property_code": prop.code,
+    }

@@ -173,6 +173,7 @@ export interface Property {
   location_accuracy?: string;
   location_updated_at?: string;
   isDemoData?: boolean;
+  is_published?: boolean;
   coordinates?: { lat: number; lng: number } | null;
   created_at: string;
   updated_at: string;
@@ -450,6 +451,34 @@ export interface CRMDatabase {
   settings: AgencySettings;
 }
 
+export interface PropertySubmissionMedia {
+  id: string;
+  original_filename: string;
+  url: string;
+  mime_type: string;
+  size: number;
+  category: string;
+  order: number;
+}
+
+export interface PropertySubmission {
+  id: string;
+  reference: string;
+  seller_name: string;
+  phone: string;
+  type: string;
+  location: string;
+  description?: string;
+  expected_price?: number;
+  size?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  notes?: string;
+  status: string;
+  created_at?: string;
+  media?: PropertySubmissionMedia[];
+}
+
 export type RoutePage =
   | 'login'
   | 'profile'
@@ -467,4 +496,6 @@ export type RoutePage =
   | 'investments'
   | 'rentals'
   | 'reports'
-  | 'settings';
+  | 'settings'
+  | 'public-submission'
+  | 'admin-submissions';

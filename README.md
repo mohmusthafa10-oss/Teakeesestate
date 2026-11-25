@@ -65,30 +65,18 @@ All tests should pass.
 
 ---
 
-## Render Deployment (Production)
+## Production Deployment Architecture (Hostinger VPS)
 
-### Backend (FastAPI)
-- **Build command:** `pip install -r requirements.txt`
-- **Start command:** `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- **Environment variables:** set in Render UI:
-  - `PROJECT_NAME="Teakees Real Estate CRM"`
-  - `ENVIRONMENT="production"`
-  - `SECRET_KEY` (secure random string)
-  - `ALGORITHM="HS256"`
-  - `ACCESS_TOKEN_EXPIRE_MINUTES=120`
-  - `REFRESH_TOKEN_EXPIRE_DAYS=7`
-  - `DATABASE_URL` – PostgreSQL URL supplied by Render PostgreSQL add‑on, e.g. `postgresql+psycopg2://user:pass@host:5432/dbname`
-  - `CORS_ORIGINS` – your frontend URL, e.g. `https://my-frontend.onrender.com`
-  - `UPLOAD_DIR=/app/uploads`
-- **Post‑deploy script:** `alembic upgrade head`
-- **Health‑check endpoint:** `GET /api/health` returns `{ "status": "ok" }`
+The authoritative production deployment target for Teakees Estate is a **Hostinger VPS running Ubuntu 24.04 LTS**:
 
-### Frontend (React 19 + Vite)
-- **Build command:** `npm install --legacy-peer-deps && npm run build`
-- **Publish directory:** `dist/`
-- **Environment variable:** `VITE_API_URL` pointing to the backend URL (e.g. `https://my-backend.onrender.com`).
+- **Web Server / Reverse Proxy:** Nginx (`deploy/nginx/teakees.conf`) handling SSL termination, static serving of public media (`/var/data/uploads/public/`), and proxying of API and private media downloads to FastAPI with `client_max_body_size 8M`.
+- **Application Server:** FastAPI running under Uvicorn managed by systemd (`uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 4`).
+- **Database:** Local PostgreSQL 16+ on VPS with connection pooling and automated encrypted backups (`backend/backup_service.py`).
+- **Media Storage:** Persistent directories with public/private segregation (`/var/data/uploads/public` and `/var/data/uploads/private`).
+- **Housekeeping:** Daily cron / systemd timer for orphan media cleanup (`python -m app.services.cleanup --execute`).
+- **Frontend:** Pre-built static single-page application served directly by Nginx (`/var/www/teakees-frontend/dist`).
 
-Render will automatically provision a PostgreSQL instance; backups can be managed via Render's built‑in backup features.
+*(Note: Legacy Render deployment blueprints in `render.yaml` are maintained for reference only).*
 
 ---
 

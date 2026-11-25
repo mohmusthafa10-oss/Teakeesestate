@@ -25,8 +25,6 @@ class Settings(BaseSettings):
     PRIVATE_UPLOAD_DIR: str = "./uploads/private"
     # Base upload directory used for static file serving (public files). Private files are stored separately.
     UPLOAD_DIR: str = "./uploads"
-    # SECRET_KEY must be provided via environment in production; no safe default.
-    SECRET_KEY: str = ""
 
     MAIL_USERNAME: str = "admin@testate.in"
     MAIL_PASSWORD: str = ""
@@ -69,7 +67,12 @@ class Settings(BaseSettings):
         return ["*"]
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(
+            ".env",
+            "backend/.env",
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "backend", ".env"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env"),
+        ),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore"

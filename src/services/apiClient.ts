@@ -441,6 +441,82 @@ class ApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  // ==================== PROPERTY LIFECYCLE & ASSIGNMENT ====================
+  async assignProperty(id: string, agentId: string): Promise<any> {
+    return this.request(`/api/properties/${id}/assign`, {
+      method: 'PATCH',
+      body: JSON.stringify({ assigned_agent_id: agentId }),
+    });
+  }
+
+  async publishProperty(id: string): Promise<{ detail: string; property_id: string; is_published: boolean }> {
+    return this.request(`/api/properties/${id}/publish`, {
+      method: 'POST',
+    });
+  }
+
+  async unpublishProperty(id: string): Promise<{ detail: string; property_id: string; is_published: boolean }> {
+    return this.request(`/api/properties/${id}/unpublish`, {
+      method: 'POST',
+    });
+  }
+
+  async getPropertyPublication(id: string): Promise<{ property_id: string; is_published: boolean; published_at?: string; unpublished_at?: string }> {
+    return this.request(`/api/properties/${id}/publication`);
+  }
+
+  // ==================== PUBLIC ENDPOINTS ====================
+  async submitPublicProperty(formData: FormData): Promise<{ reference: string; status: string; message: string }> {
+    return this.request('/api/public/property-submissions', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  async getPublicProperties(params?: Record<string, any>): Promise<{ items: any[]; total: number; page: number; page_size: number }> {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.request(`/api/public/properties${qs}`);
+  }
+
+  async getPublicProperty(id: string): Promise<any> {
+    return this.request(`/api/public/properties/${id}`);
+  }
+
+  async submitPublicEnquiry(propertyId: string, enquiry: { name: string; phone: string; email?: string; message?: string }): Promise<any> {
+    return this.request(`/api/public/properties/${propertyId}/enquiry`, {
+      method: 'POST',
+      body: JSON.stringify(enquiry),
+    });
+  }
+
+  // ==================== ADMIN SUBMISSIONS ====================
+  async getAdminSubmissions(params?: Record<string, any>): Promise<any[]> {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return this.request(`/api/admin/property-submissions/${qs}`);
+  }
+
+  async getAdminSubmission(id: string): Promise<any> {
+    return this.request(`/api/admin/property-submissions/${id}`);
+  }
+
+  async approveAdminSubmission(id: string): Promise<any> {
+    return this.request(`/api/admin/property-submissions/${id}/approve`, {
+      method: 'POST',
+    });
+  }
+
+  async rejectAdminSubmission(id: string, reason: string): Promise<any> {
+    return this.request(`/api/admin/property-submissions/${id}/reject?reason=${encodeURIComponent(reason)}`, {
+      method: 'POST',
+    });
+  }
+
+  async convertAdminSubmission(id: string): Promise<{ detail: string; property_id: string; property_code: string }> {
+    return this.request(`/api/admin/property-submissions/${id}/convert`, {
+      method: 'POST',
+    });
+  }
 }
 
 export const apiClient = new ApiClient();

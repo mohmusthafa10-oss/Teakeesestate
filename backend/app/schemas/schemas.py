@@ -168,7 +168,7 @@ class PropertyBase(BaseModel):
     google_maps_url: Optional[str] = None
     area_value: Decimal
     area_unit: str = "Cents"
-    road_connectivity: str = "Tar Road Access"
+    road_connectivity: Optional[str] = "Tar Road Access"
     distance_to_highway: Optional[str] = None
     nearby_landmarks: Optional[str] = None
     water_availability: Optional[str] = None
@@ -236,7 +236,7 @@ class PropertyUpdate(BaseModel):
 class PropertyResponse(PropertyBase):
     id: str
     code: str
-    seller_id: str
+    seller_id: Optional[str] = None
     added_date: Optional[Any] = None
     created_at: datetime
     updated_at: datetime

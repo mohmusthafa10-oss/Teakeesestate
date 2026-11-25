@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarPlus,
   CheckCircle2,
   Clock,
   ExternalLink,
   FilePlus2,
+  Globe,
   Handshake,
   History,
   ImagePlus,
@@ -16,6 +17,7 @@ import {
   User,
   Wallet,
 } from 'lucide-react';
+import { apiClient } from '../services/apiClient';
 import { useCRM } from '../context/CRMContext';
 import {
   ADVANCE_PAYMENT_METHODS,
@@ -46,7 +48,7 @@ import { EditPropertyForm } from './PropertiesPage';
 import { getPropertyCoords } from '../utils/geo';
 
 export const PropertyProfilePage: React.FC = () => {
-  const { db, route, navigate, updateDb, notify } = useCRM();
+  const { db, route, navigate, updateDb, notify, currentUser } = useCRM();
   const currency = db.settings.currencySymbol;
 
   const property = db.properties.find((p) => p.id === route.id);
@@ -59,6 +61,37 @@ export const PropertyProfilePage: React.FC = () => {
   const [docModalOpen, setDocModalOpen] = useState(false);
   const [visitModalOpen, setVisitModalOpen] = useState(false);
   const [followUpModalOpen, setFollowUpModalOpen] = useState(false);
+
+  const [isPublished, setIsPublished] = useState<boolean>(false);
+  const [publishLoading, setPublishLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (property?.id) {
+      apiClient.getPropertyPublication(property.id)
+        .then((res) => setIsPublished(res.is_published))
+        .catch(() => {});
+    }
+  }, [property?.id]);
+
+  const togglePublication = async () => {
+    if (!property) return;
+    setPublishLoading(true);
+    try {
+      if (isPublished) {
+        await apiClient.unpublishProperty(property.id);
+        setIsPublished(false);
+        notify('Property unpublished from public website', 'info');
+      } else {
+        await apiClient.publishProperty(property.id);
+        setIsPublished(true);
+        notify('Property published to public website', 'success');
+      }
+    } catch (err: any) {
+      notify('Failed to update publication: ' + err.message, 'error');
+    } finally {
+      setPublishLoading(false);
+    }
+  };
 
   // Advance modals state
   const [advanceModalOpen, setAdvanceModalOpen] = useState(false);
@@ -309,6 +342,22 @@ export const PropertyProfilePage: React.FC = () => {
               <Pencil className="w-3.5 h-3.5 text-[#064E3B]" />
               Edit Property &amp; Site Details
             </button>
+
+            {currentUser?.role === 'Admin' && (
+              <button
+                type="button"
+                disabled={publishLoading}
+                onClick={togglePublication}
+                className={`h-9 px-3.5 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isPublished
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                    : 'border-[#E5E4DA] bg-white text-[#20251F] hover:bg-[#E4EBE0]/60'
+                }`}
+              >
+                <Globe className="w-3.5 h-3.5 text-[#064E3B]" />
+                {isPublished ? 'Published to Web' : 'Publish to Web'}
+              </button>
+            )}
 
             <button
               type="button"

@@ -39,8 +39,9 @@ async def lifespan(app: FastAPI):
 
     # Startup: ensure tables exist
     Base.metadata.create_all(bind=engine)
-    # Ensure public upload directory exists (static files are served only from PUBLIC_UPLOAD_DIR)
-    os.makedirs(settings.PUBLIC_UPLOAD_DIR, exist_ok=True)
+    # Ensure public and private upload directories exist safely and do not overlap
+    from app.api.routes.uploads import ensure_upload_dirs
+    ensure_upload_dirs()
 
     # Seed initial admin and agent users from environment variables (only in development)
     # This avoids hard‑coded credentials in production. The seeding runs only when the
@@ -124,9 +125,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static file serving for uploads
-# Ensure public upload directory exists (static files are served only from PUBLIC_UPLOAD_DIR)
-os.makedirs(settings.PUBLIC_UPLOAD_DIR, exist_ok=True)
+# Static file serving for uploads (public uploads ONLY)
+from app.api.routes.uploads import ensure_upload_dirs
+ensure_upload_dirs()
 app.mount("/uploads", StaticFiles(directory=settings.PUBLIC_UPLOAD_DIR), name="uploads")
 
 # Include all API routers

@@ -20,6 +20,8 @@ import { LoginPage } from './pages/LoginPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { PropertiesPage } from './pages/PropertiesPage';
 import { PropertyProfilePage } from './pages/PropertyProfilePage';
+import { PublicPropertySubmissionPage } from './pages/PublicPropertySubmissionPage';
+import { AdminSubmissionsPage } from './pages/AdminSubmissionsPage';
 import { RentalsPage } from './pages/RentalsPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { RunningPropertiesPage } from './pages/RunningPropertiesPage';
@@ -31,8 +33,17 @@ const CRMWorkspace: React.FC = () => {
   const { route, isLoading, isAuthenticated } = useCRM();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
-  // If unauthenticated, display pure Login view
+  // If unauthenticated, display Public Property Submission or pure Login view
   if (!isAuthenticated) {
+    if (route.page === 'public-submission') {
+      return (
+        <div className="min-h-screen bg-[#F1F0E8] text-[#20251F] py-8 px-4">
+          <InfinityPreloader visible={isLoading} />
+          <PublicPropertySubmissionPage />
+          <ToastStack />
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen bg-[#F1F0E8] text-[#20251F]">
         <InfinityPreloader visible={isLoading} />
@@ -55,6 +66,10 @@ const CRMWorkspace: React.FC = () => {
         return <PropertyProfilePage />;
       case 'register-property':
         return <AddSellerPropertyPage />;
+      case 'admin-submissions':
+        return <AdminSubmissionsPage />;
+      case 'public-submission':
+        return <PublicPropertySubmissionPage />;
       case 'leads':
         return <LeadsPage />;
       case 'lead-detail':

@@ -4,6 +4,7 @@ import {
   BarChart3,
   Building2,
   CalendarCheck2,
+  ClipboardList,
   Handshake,
   Home,
   LayoutDashboard,
@@ -89,6 +90,12 @@ export const Sidebar: React.FC<{
           icon: UserCheck,
           activeMatches: ['sellers', 'seller-detail'],
           count: visibleSellers.length,
+        },
+        {
+          label: 'Submissions',
+          page: 'admin-submissions',
+          icon: ClipboardList,
+          activeMatches: ['admin-submissions'],
         },
         {
           label: 'Running Properties',

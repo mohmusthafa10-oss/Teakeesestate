@@ -1,3 +1,8 @@
+# ==============================================================================
+# LEGACY / ALTERNATIVE CLOUD BLUEPRINT (RENDER)
+# Authoritative Production Target: Hostinger VPS (Ubuntu 24.04, Nginx, PostgreSQL)
+# Refer to deploy/nginx/teakees.conf and docs/PRODUCTION_READINESS_PLAN.md
+# ==============================================================================
 # Render Blueprint — Teakees Real Estate CRM
 # https://render.com/docs/blueprint-spec
 #
