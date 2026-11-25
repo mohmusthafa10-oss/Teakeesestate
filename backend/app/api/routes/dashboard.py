@@ -22,5 +22,8 @@ def recent_activities(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    return db.query(ActivityLog).order_by(ActivityLog.timestamp.desc()).limit(25).all()
+    query = db.query(ActivityLog)
+    if current_user.role == "Agent":
+        query = query.filter(ActivityLog.user_id == current_user.id)
+    return query.order_by(ActivityLog.timestamp.desc()).limit(25).all()
 

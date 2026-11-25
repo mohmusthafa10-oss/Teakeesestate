@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, require_permission
 from app.database.session import get_db
-from app.models.models import PropertyMatch, User
+from app.models.models import Lead, Property, PropertyMatch, User
 from app.schemas.schemas import PropertyMatchCreate, PropertyMatchResponse, PropertyMatchUpdate
 
 router = APIRouter(prefix="/api/matches", tags=["Matches"])
@@ -19,6 +19,9 @@ def get_matches(
     db: Session = Depends(get_db),
 ):
     query = db.query(PropertyMatch)
+    if current_user.role == "Agent":
+        query = query.outerjoin(Lead, PropertyMatch.lead_id == Lead.id).outerjoin(Property, PropertyMatch.property_id == Property.id)
+        query = query.filter((Lead.assigned_agent_id == current_user.id) | (Property.assigned_agent_id == current_user.id))
     if lead_id:
         query = query.filter(PropertyMatch.lead_id == lead_id)
     if property_id:
@@ -31,6 +34,12 @@ def create_match_record(
     current_user: User = Depends(require_permission("leads.update")),
     db: Session = Depends(get_db),
 ):
+    if current_user.role == "Agent":
+        lead = db.query(Lead).filter(Lead.id == data.lead_id).first()
+        prop = db.query(Property).filter(Property.id == data.property_id).first()
+        if (not lead or lead.assigned_agent_id != current_user.id) and (not prop or prop.assigned_agent_id != current_user.id):
+            raise HTTPException(status_code=403, detail="Access denied: Cannot create match for another agent's records")
+
     existing = db.query(PropertyMatch).filter(
         PropertyMatch.lead_id == data.lead_id,
         PropertyMatch.property_id == data.property_id,
@@ -63,6 +72,11 @@ def update_match_record(
     match = db.query(PropertyMatch).filter(PropertyMatch.id == id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
+    if current_user.role == "Agent":
+        lead = db.query(Lead).filter(Lead.id == match.lead_id).first()
+        prop = db.query(Property).filter(Property.id == match.property_id).first()
+        if (not lead or lead.assigned_agent_id != current_user.id) and (not prop or prop.assigned_agent_id != current_user.id):
+            raise HTTPException(status_code=403, detail="Access denied: Cannot update match for another agent's records")
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(match, k, v)
     db.commit()

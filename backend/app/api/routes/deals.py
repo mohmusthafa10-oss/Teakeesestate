@@ -2,7 +2,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_active_user, require_permission
+from app.api.deps import (
+    check_reassignment_permission,
+    check_record_access,
+    get_current_active_user,
+    require_permission,
+)
 from app.database.session import get_db
 from app.models.models import Deal, User
 from app.schemas.schemas import DealCreate, DealResponse, DealUpdate, PaginatedResponse
@@ -53,8 +58,11 @@ def update_deal_status(
     current_user: User = Depends(require_permission("deals.update")),
     db: Session = Depends(get_db),
 ):
-    deal = update_deal(db, id, data, current_user.id)
+    deal = db.query(Deal).filter(Deal.id == id).first()
     if not deal:
         raise HTTPException(status_code=404, detail="Deal not found")
+    check_record_access(deal, current_user, owner_field="assigned_agent_id")
+    check_reassignment_permission(data, current_user)
+    deal = update_deal(db, id, data, current_user.id)
     return deal
 

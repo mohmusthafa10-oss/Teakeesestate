@@ -1,11 +1,13 @@
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 import uuid
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, or_
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_optional
+from app.core.rate_limiter import login_limiter
 from app.database.session import get_db
 from app.models.models import Lead, Property, PropertyImage, PropertyPublication, PropertySubmission, SubmissionMedia, SubmissionStatus, User
 from app.services.media_storage import MediaStorageService
@@ -28,6 +30,7 @@ def _generate_reference() -> str:
 
 @router.post("/property-submissions", response_model=dict)
 async def create_property_submission(
+    request: Request,
     seller_name: str = Form(...),
     mobile: str = Form(...),
     property_type: str = Form(...),
@@ -43,15 +46,47 @@ async def create_property_submission(
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     """Public endpoint for property submission.
-    Accepts required fields via form data and optional media files.
+    Enforces file count limits, magic-byte validation, EXIF stripping, IP rate limiting,
+    and duplicate submission detection.
     """
+    # 1. IP rate limiting on public submission endpoint
+    client_ip = login_limiter.get_client_ip(request)
+    submission_ip_key = f"pub_submit_{client_ip}"
+    login_limiter.check_rate_limit(submission_ip_key)
+
+    # 2. File count enforcement
+    if len(files) > 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum 10 media files allowed per property submission.",
+        )
+
+    # 3. Basic duplicate submission detection (same phone & location within 15 minutes)
+    clean_phone = mobile.strip()
+    fifteen_mins_ago = datetime.now(timezone.utc) - timedelta(minutes=15)
+    existing_dup = (
+        db.query(PropertySubmission)
+        .filter(
+            PropertySubmission.phone == clean_phone,
+            PropertySubmission.location.ilike(location.strip()),
+            PropertySubmission.created_at >= fifteen_mins_ago,
+        )
+        .first()
+    )
+    if existing_dup:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"A property submission for this location was recently received. Reference: {existing_dup.reference}",
+        )
+
+    # 4. Create submission record
     submission = PropertySubmission(
         reference=_generate_reference(),
-        seller_name=seller_name,
-        phone=mobile,
+        seller_name=seller_name.strip(),
+        phone=clean_phone,
         type=property_type,
-        location=location,
-        description=description,
+        location=location.strip(),
+        description=description.strip(),
         expected_price=expected_price,
         size=size,
         bedrooms=bedrooms,
@@ -63,19 +98,21 @@ async def create_property_submission(
     db.add(submission)
     db.flush()
 
+    # 5. Process media files through validation and EXIF stripping
     media_service = MediaStorageService()
     for order, upload in enumerate(files, start=1):
         saved = media_service.save_file(upload)
         media = SubmissionMedia(
             submission_id=submission.id,
-            original_filename=upload.filename,
+            original_filename=upload.filename or "media",
             storage_key=saved["storage_key"],
-            mime_type=saved.get("mime_type", upload.content_type or "application/octet-stream"),
-            size=saved.get("size", 0),
-            category="photo" if (upload.content_type and upload.content_type.startswith("image")) else "video",
+            mime_type=saved["mime_type"],
+            size=saved["size"],
+            category="video" if "video" in saved["mime_type"] else "photo",
             order=order,
         )
         db.add(media)
+
     db.commit()
     return {
         "reference": submission.reference,

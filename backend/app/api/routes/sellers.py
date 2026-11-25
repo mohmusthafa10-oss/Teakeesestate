@@ -2,7 +2,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_active_user, require_permission
+from app.api.deps import (
+    check_reassignment_permission,
+    check_record_access,
+    get_current_active_user,
+    require_permission,
+)
 from app.database.session import get_db
 from app.models.models import Property, Seller, User
 from app.schemas.schemas import PaginatedResponse, PropertyResponse, SellerCreate, SellerResponse, SellerUpdate
@@ -55,6 +60,7 @@ def update_seller_by_id(
         raise HTTPException(status_code=404, detail="Seller not found")
     if current_user.role == "Agent" and seller.assigned_agent_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to update this seller")
+    check_reassignment_permission(data, current_user)
     return update_seller(db, id, data, current_user.id)
 
 @router.get("/{id}/properties", response_model=List[PropertyResponse])
@@ -66,6 +72,8 @@ def get_seller_properties(
     seller = get_seller(db, id)
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
+    if current_user.role == "Agent" and seller.assigned_agent_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this seller's properties")
     props = db.query(Property).filter(Property.seller_id == id).all()
     from app.services.services import calculate_days_listed
     for p in props:

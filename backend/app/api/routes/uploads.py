@@ -1,14 +1,24 @@
 import os
 import re
 import uuid
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_active_user, get_current_user_optional
 from app.core.config import settings
 from app.database.session import get_db
-from app.models.models import User, SubmissionMedia, PropertyDocument, Property, Seller
+from app.models.models import (
+    Property,
+    PropertyDocument,
+    PropertyImage,
+    PropertyPublication,
+    PropertySubmission,
+    Seller,
+    SubmissionMedia,
+    User,
+)
 
 router = APIRouter(prefix="/api/uploads", tags=["Uploads"])
 
@@ -215,3 +225,143 @@ async def download_private_file(
                 )
 
     return FileResponse(canonical_target_path, filename=filename)
+
+
+media_router = APIRouter(tags=["Media Delivery"])
+
+
+@media_router.get("/uploads/{filename}")
+@media_router.get("/api/uploads/public/{filename}")
+async def serve_upload_file(
+    filename: str,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    State-aware media serving endpoint:
+    - Protects against directory traversal and symlinks.
+    - If associated with a published Property (PropertyImage / PropertyPublication.is_published=True),
+      serves publicly with cache headers.
+    - If associated with an unpublished Property, requires authentication (Admin or assigned Agent).
+    - If associated with a Submission (SubmissionMedia), requires authentication (Admin, assigned Agent, or creator Telecaller).
+    - If unattached, requires an authenticated user.
+    """
+    if not SAFE_FILENAME_PATTERN.match(filename) or ".." in filename or "/" in filename or "\\" in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename format")
+
+    public_dir, _ = ensure_upload_dirs()
+    canonical_public_dir = os.path.realpath(public_dir)
+
+    target_path = os.path.join(public_dir, filename)
+    canonical_target_path = os.path.realpath(target_path)
+
+    if not (canonical_target_path == canonical_public_dir or canonical_target_path.startswith(canonical_public_dir + os.sep)):
+        raise HTTPException(status_code=400, detail="Access denied: Invalid file path")
+
+    if os.path.islink(target_path):
+        raise HTTPException(status_code=400, detail="Access denied: Symlinks not permitted")
+
+    if not os.path.exists(canonical_target_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # 1. Check if associated with a Property via PropertyImage
+    img = db.query(PropertyImage).filter(
+        (PropertyImage.url == f"/uploads/{filename}")
+        | (PropertyImage.url == filename)
+        | (PropertyImage.url.endswith(f"/{filename}"))
+    ).first()
+
+    if img:
+        prop = db.query(Property).filter(Property.id == img.property_id).first()
+        pub = db.query(PropertyPublication).filter(
+            PropertyPublication.property_id == img.property_id,
+            PropertyPublication.is_published == True,
+        ).first()
+
+        if pub and pub.is_published:
+            return FileResponse(
+                canonical_target_path,
+                filename=filename,
+                headers={"Cache-Control": "public, max-age=86400, immutable"},
+            )
+
+        # Unpublished: requires authentication
+        if not current_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required to view unpublished property media",
+            )
+        if current_user.role == "Admin" or (prop and prop.assigned_agent_id == current_user.id):
+            return FileResponse(
+                canonical_target_path,
+                filename=filename,
+                headers={"Cache-Control": "private, no-cache, no-store, must-revalidate"},
+            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Unpublished media is assigned to another advisor",
+        )
+
+    # 2. Check if associated with a SubmissionMedia
+    media = db.query(SubmissionMedia).filter(
+        (SubmissionMedia.storage_key == filename) | (SubmissionMedia.thumbnail_key == filename)
+    ).first()
+
+    if media:
+        # Check if submission was converted to a property that is published
+        pub_img = (
+            db.query(PropertyImage)
+            .join(PropertyPublication, PropertyPublication.property_id == PropertyImage.property_id)
+            .filter(
+                (PropertyImage.url.endswith(filename))
+                & (PropertyPublication.is_published == True)
+            )
+            .first()
+        )
+        if pub_img:
+            return FileResponse(
+                canonical_target_path,
+                filename=filename,
+                headers={"Cache-Control": "public, max-age=86400, immutable"},
+            )
+
+        # Submissions media not yet published: require authentication
+        if not current_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required to view submission media",
+            )
+        sub = db.query(PropertySubmission).filter(PropertySubmission.id == media.submission_id).first()
+        if current_user.role == "Admin":
+            return FileResponse(
+                canonical_target_path,
+                filename=filename,
+                headers={"Cache-Control": "private, no-cache, no-store, must-revalidate"},
+            )
+        if sub:
+            assigned_id = getattr(sub, "assigned_agent_id", None)
+            creator_id = getattr(sub, "created_by_user_id", None)
+            uploader_id = media.uploaded_by
+            if current_user.id in {uid for uid in (assigned_id, creator_id, uploader_id) if uid}:
+                return FileResponse(
+                    canonical_target_path,
+                    filename=filename,
+                    headers={"Cache-Control": "private, no-cache, no-store, must-revalidate"},
+                )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Submission media is not accessible",
+        )
+
+    # 3. Unattached file in public upload dir: require authenticated user
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to access unattached media",
+        )
+
+    return FileResponse(
+        canonical_target_path,
+        filename=filename,
+        headers={"Cache-Control": "private, no-cache, no-store, must-revalidate"},
+    )

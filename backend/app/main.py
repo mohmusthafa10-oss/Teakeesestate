@@ -27,74 +27,59 @@ from app.api.routes import (
 from app.api.routes.public import router as public_router
 from app.api.routes.admin_submissions import router as admin_submissions_router
 from app.core.config import settings
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, validate_admin_password_strength
 from app.database.base import Base
 from app.database.session import SessionLocal, engine, validate_database_connection
 from app.models.models import SequenceCounter, User
+
+import logging
+import re
+import uuid
+
+logger = logging.getLogger("teakees.main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Validate database connection on startup — fails fast with a clear error message
     validate_database_connection()
 
-    # Startup: ensure tables exist
-    Base.metadata.create_all(bind=engine)
     # Ensure public and private upload directories exist safely and do not overlap
     from app.api.routes.uploads import ensure_upload_dirs
     ensure_upload_dirs()
 
-    # Seed initial admin and agent users from environment variables (only in development)
-    # This avoids hard‑coded credentials in production. The seeding runs only when the
-    # database is empty and the required environment variables are present.
+    # Bootstrap initial admin user from environment variables if no admin exists
     from os import getenv
     db = SessionLocal()
     try:
-        # Helper to create a user if not existing
-        def create_user_if_missing(user_id: str, name: str, email_env: str, phone: str, password_env: str, role: str, designation: str):
-            existing = db.query(User).filter(User.id == user_id).first()
-            if existing:
-                return
-            email = getenv(email_env)
-            password = getenv(password_env)
-            if not email or not password:
-                # In production we abort seeding; in development we can skip silently.
-                if settings.ENVIRONMENT == "production":
-                    raise RuntimeError(
-                        f"Missing environment variables for seeding user {user_id}: {email_env} and/or {password_env}"
-                    )
-                return
-            user = User(
-                id=user_id,
-                name=name,
-                email=email,
-                phone=phone,
-                password_hash=get_password_hash(password),
-                role=role,
-                designation=designation,
-                active=True,
-            )
-            db.add(user)
+        admin_user = db.query(User).filter(User.role == "Admin").first()
+        if not admin_user:
+            admin_email = getenv("FIRST_ADMIN_EMAIL") or getenv("ADMIN_SEED_EMAIL")
+            admin_password = getenv("FIRST_ADMIN_PASSWORD") or getenv("ADMIN_SEED_PASSWORD")
 
-        # Only seed when in non‑production environments
-        if settings.ENVIRONMENT != "production":
-            create_user_if_missing(
-                user_id="usr-1",
-                name="Arjun Menon",
-                email_env="ADMIN_SEED_EMAIL",
-                phone="+91 98470 11220",
-                password_env="ADMIN_SEED_PASSWORD",
-                role="Admin",
-                designation="Managing Partner",
-            )
-            create_user_if_missing(
-                user_id="usr-2",
-                name="Meera Nair",
-                email_env="AGENT_SEED_EMAIL",
-                phone="+91 98471 33445",
-                password_env="AGENT_SEED_PASSWORD",
-                role="Agent",
-                designation="Senior Property Advisor",
-            )
+            if admin_email and admin_password:
+                try:
+                    validate_admin_password_strength(admin_password)
+                    new_admin = User(
+                        id=f"usr-{uuid.uuid4().hex[:8]}",
+                        name="System Administrator",
+                        email=admin_email.strip(),
+                        phone=getenv("FIRST_ADMIN_PHONE", "+91 98470 00000"),
+                        password_hash=get_password_hash(admin_password),
+                        role="Admin",
+                        designation="Managing Partner",
+                        active=True,
+                    )
+                    db.add(new_admin)
+                    db.commit()
+                    logger.info("Successfully bootstrapped initial admin account: %s", admin_email)
+                except ValueError as ve:
+                    if settings.is_production:
+                        raise RuntimeError(f"FATAL: Initial admin bootstrap password rejected: {ve}")
+                    else:
+                        logger.warning("Initial admin bootstrap password rejected: %s", ve)
+            else:
+                if settings.is_production:
+                    logger.warning("No Admin user found in database and FIRST_ADMIN_EMAIL/PASSWORD not set. Run `python -m app.bootstrap_admin` to create an admin.")
 
         # Initialize sequence counters if missing
         prefixes = [("TAK", 8), ("SLR", 1004), ("LED", 1008), ("DL", 1006), ("ADV", 1002), ("INV", 1003), ("RNT", 1003)]
@@ -125,10 +110,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static file serving for uploads (public uploads ONLY)
-from app.api.routes.uploads import ensure_upload_dirs
-ensure_upload_dirs()
-app.mount("/uploads", StaticFiles(directory=settings.PUBLIC_UPLOAD_DIR), name="uploads")
+# State-aware media delivery router (replaces unauthenticated static mount)
+from app.api.routes.uploads import media_router
+app.include_router(media_router)
 
 # Include all API routers
 app.include_router(auth.router)

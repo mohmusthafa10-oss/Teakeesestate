@@ -2,7 +2,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_active_user, require_permission
+from app.api.deps import (
+    check_reassignment_permission,
+    check_record_access,
+    get_current_active_user,
+    require_permission,
+)
 from app.database.session import get_db
 from app.models.models import FollowUp, User
 from app.schemas.schemas import (
@@ -46,6 +51,8 @@ def update_followup(
     fup = db.query(FollowUp).filter(FollowUp.id == id).first()
     if not fup:
         raise HTTPException(status_code=404, detail="Follow-up not found")
+    check_record_access(fup, current_user, owner_field="agent_id")
+    check_reassignment_permission(data, current_user)
     for k, v in data.model_dump(exclude_unset=True).items():
         setattr(fup, k, v)
     db.commit()
@@ -59,6 +66,10 @@ def complete_followup_endpoint(
     current_user: User = Depends(require_permission("followups.update")),
     db: Session = Depends(get_db),
 ):
+    fup = db.query(FollowUp).filter(FollowUp.id == id).first()
+    if not fup:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+    check_record_access(fup, current_user, owner_field="agent_id")
     res = complete_followup(db, id, req, current_user.id)
     if not res:
         raise HTTPException(status_code=404, detail="Follow-up not found")
