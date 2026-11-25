@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
 
     # Bootstrap initial admin user from environment variables if no admin exists
     from os import getenv
+    from sqlalchemy import func
     db = SessionLocal()
     try:
         admin_user = db.query(User).filter(User.role == "Admin").first()
@@ -57,38 +58,48 @@ async def lifespan(app: FastAPI):
             admin_password = getenv("FIRST_ADMIN_PASSWORD") or getenv("ADMIN_SEED_PASSWORD")
 
             if admin_email and admin_password:
+                clean_email = admin_email.strip().lower()
                 try:
                     validate_admin_password_strength(admin_password)
-                    new_admin = User(
-                        id=f"usr-{uuid.uuid4().hex[:8]}",
-                        name="System Administrator",
-                        email=admin_email.strip(),
-                        phone=getenv("FIRST_ADMIN_PHONE", "+91 98470 00000"),
-                        password_hash=get_password_hash(admin_password),
-                        role="Admin",
-                        designation="Managing Partner",
-                        active=True,
-                    )
-                    db.add(new_admin)
-                    db.commit()
-                    logger.info("Successfully bootstrapped initial admin account: %s", admin_email)
+                    existing_user = db.query(User).filter(func.lower(User.email) == clean_email).first()
+                    if existing_user:
+                        if existing_user.role != "Admin":
+                            logger.error(
+                                "Cannot bootstrap initial Admin: email '%s' is already registered to a '%s' user. "
+                                "Promotion of existing non-admin accounts during startup is strictly prohibited.",
+                                clean_email, existing_user.role
+                            )
+                        else:
+                            logger.info("Admin user '%s' already exists.", clean_email)
+                    else:
+                        new_admin = User(
+                            id=f"usr-{uuid.uuid4().hex[:8]}",
+                            name=getenv("FIRST_ADMIN_NAME", "System Administrator"),
+                            email=clean_email,
+                            phone=getenv("FIRST_ADMIN_PHONE", None),
+                            password_hash=get_password_hash(admin_password),
+                            role="Admin",
+                            designation="Managing Partner",
+                            active=True,
+                        )
+                        db.add(new_admin)
+                        db.commit()
+                        logger.info("Successfully bootstrapped initial admin account: %s", clean_email)
                 except ValueError as ve:
+                    db.rollback()
                     if settings.is_production:
                         raise RuntimeError(f"FATAL: Initial admin bootstrap password rejected: {ve}")
                     else:
                         logger.warning("Initial admin bootstrap password rejected: %s", ve)
+                except Exception as e:
+                    db.rollback()
+                    logger.error("Failed to bootstrap initial admin account: %s", e)
             else:
                 if settings.is_production:
                     logger.warning("No Admin user found in database and FIRST_ADMIN_EMAIL/PASSWORD not set. Run `python -m app.bootstrap_admin` to create an admin.")
-
-        # Initialize sequence counters if missing
-        prefixes = [("TAK", 8), ("SLR", 1004), ("LED", 1008), ("DL", 1006), ("ADV", 1002), ("INV", 1003), ("RNT", 1003)]
-        for pfx, val in prefixes:
-            cnt = db.query(SequenceCounter).filter(SequenceCounter.prefix == pfx).first()
-            if not cnt:
-                db.add(SequenceCounter(prefix=pfx, current_value=val))
-
-        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error("Database error during startup bootstrap: %s", e)
     finally:
         db.close()
 

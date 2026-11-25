@@ -64,7 +64,7 @@ def verify_postgresql_compatibility():
     print("[2/5] Transactional DDL (BEGIN ... COMMIT) verified.")
 
     # 2. Verify Revision Chain
-    revisions = ["be4c25d2b067", "pg_compat_0002", "43c5f0cc7276"]
+    revisions = ["be4c25d2b067", "pg_compat_0002", "43c5f0cc7276", "a1b2c3d4e5f6"]
     for rev in revisions:
         assert rev in sql_output, f"Revision {rev} not found in compiled SQL"
     print(f"[3/5] Migration revision chain verified: {' -> '.join(revisions)} (HEAD).")
@@ -85,6 +85,7 @@ def verify_postgresql_compatibility():
         "property_submissions",
         "submission_media",
         "property_publication",
+        "password_reset_tokens",
         "leads",
         "deals",
         "activity_logs",

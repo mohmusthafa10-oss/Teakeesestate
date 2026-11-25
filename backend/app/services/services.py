@@ -690,17 +690,17 @@ def complete_followup(db: Session, followup_id: str, req: FollowUpCompleteReques
         followup.notes = f"{followup.notes}\n[Completed]: {req.notes}".strip()
 
     # Update last contacted date on related entity
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_dt = datetime.now(timezone.utc)
     if followup.related_type == "Lead":
         lead = db.query(Lead).filter(Lead.id == followup.related_id).first()
         if lead:
-            lead.last_contacted_date = now_iso
+            lead.last_contacted_date = now_dt
             lead.last_contact_method = followup.activity_type
             lead.last_conversation_notes = req.notes or followup.notes
     elif followup.related_type == "Seller":
         seller = db.query(Seller).filter(Seller.id == followup.related_id).first()
         if seller:
-            seller.last_contacted_date = now_iso
+            seller.last_contacted_date = now_dt
             seller.last_contact_method = followup.activity_type
             seller.last_conversation_notes = req.notes or followup.notes
 

@@ -44,8 +44,7 @@ def get_seller_by_id(
     seller = get_seller(db, id)
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
-    if current_user.role == "Agent" and seller.assigned_agent_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this seller")
+    check_record_access(seller, current_user, owner_field="assigned_agent_id")
     return seller
 
 @router.put("/{id}", response_model=SellerResponse)
@@ -58,8 +57,7 @@ def update_seller_by_id(
     seller = get_seller(db, id)
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
-    if current_user.role == "Agent" and seller.assigned_agent_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to update this seller")
+    check_record_access(seller, current_user, owner_field="assigned_agent_id")
     check_reassignment_permission(data, current_user)
     return update_seller(db, id, data, current_user.id)
 
@@ -72,8 +70,7 @@ def get_seller_properties(
     seller = get_seller(db, id)
     if not seller:
         raise HTTPException(status_code=404, detail="Seller not found")
-    if current_user.role == "Agent" and seller.assigned_agent_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this seller's properties")
+    check_record_access(seller, current_user, owner_field="assigned_agent_id")
     props = db.query(Property).filter(Property.seller_id == id).all()
     from app.services.services import calculate_days_listed
     for p in props:

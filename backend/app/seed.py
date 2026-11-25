@@ -46,8 +46,15 @@ def run_seed():
             return
 
         print("Seeding Users...")
-        admin_pwd = os.getenv("SEED_ADMIN_PASSWORD", "AdminDevSecure#2026")
-        agent_pwd = os.getenv("SEED_AGENT_PASSWORD", "AgentDevSecure#2026")
+        admin_pwd = os.getenv("SEED_ADMIN_PASSWORD")
+        agent_pwd = os.getenv("SEED_AGENT_PASSWORD")
+        if not admin_pwd or not agent_pwd:
+            raise RuntimeError(
+                "SEED_ADMIN_PASSWORD and SEED_AGENT_PASSWORD environment variables must be provided for database seeding. "
+                "Hardcoded fallback credentials are strictly prohibited."
+            )
+        from app.core.security import validate_admin_password_strength
+        validate_admin_password_strength(admin_pwd)
 
         users = [
             User(

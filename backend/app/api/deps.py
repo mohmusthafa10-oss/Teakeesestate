@@ -32,11 +32,17 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise credentials_exception
+    if not user.active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Inactive user account",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 # Optional authentication for public endpoints (no error on missing/invalid token)
 def get_current_user_optional(token: str = Depends(OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)), db: Session = Depends(get_db)) -> Optional[User]:
-    """Return the current user if a valid token is provided, otherwise None."""
+    """Return the current user if a valid token is provided and user is active, otherwise None."""
     if not token:
         return None
     try:
@@ -48,11 +54,17 @@ def get_current_user_optional(token: str = Depends(OAuth2PasswordBearer(tokenUrl
     except Exception:
         return None
     user = db.query(User).filter(User.id == user_id).first()
+    if user is None or not user.active:
+        return None
     return user
 
 def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.active:
-        raise HTTPException(status_code=400, detail="Inactive user")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Inactive user account",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return current_user
 
 def require_admin(current_user: User = Depends(get_current_active_user)) -> User:
@@ -94,6 +106,12 @@ def check_record_access(
     if user.role == "Agent":
         assigned_id = getattr(record, owner_field, None)
         created_id = getattr(record, creator_field, None) if creator_field else None
+        if not created_id:
+            created_id = (
+                getattr(record, "created_by", None)
+                or getattr(record, "created_by_user_id", None)
+                or getattr(record, "recorded_by", None)
+            )
         if assigned_id != user.id and created_id != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -102,8 +120,10 @@ def check_record_access(
         return
 
     if user.role == "Telecaller":
-        created_id = getattr(record, "created_by_user_id", None) or (
-            getattr(record, creator_field, None) if creator_field else None
+        created_id = (
+            getattr(record, "created_by_user_id", None)
+            or (getattr(record, creator_field, None) if creator_field else None)
+            or getattr(record, "created_by", None)
         )
         if created_id != user.id:
             raise HTTPException(
