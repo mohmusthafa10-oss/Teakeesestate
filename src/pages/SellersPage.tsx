@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Eye, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { crmService, SELLER_RELATIONSHIPS } from '../services/crmService';
+import { apiClient } from '../services/apiClient';
 import { Seller, SellerRelationship } from '../types/crm';
 import { formatDate, formatDaysAgo } from '../utils/formatters';
 import {
@@ -12,7 +13,7 @@ import {
 } from '../components/common/UIPrimitives';
 
 export const SellersPage: React.FC = () => {
-  const { db, currentUser, navigate, updateDb, visibleSellers } = useCRM();
+  const { db, currentUser, navigate, updateDb, visibleSellers, notify, refreshDb } = useCRM();
 
   const [search, setSearch] = useState('');
   const [agentFilter, setAgentFilter] = useState('All');
@@ -81,26 +82,52 @@ export const SellersPage: React.FC = () => {
   const getAgentName = (id: string) =>
     db.users.find((u) => u.id === id)?.name || 'Unassigned';
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !phone.trim()) return;
-    const ok = updateDb(
-      (prev) =>
-        crmService.upsertSeller(prev, {
-          id: editingSeller?.id,
+    try {
+      if (editingSeller) {
+        await apiClient.updateSeller(editingSeller.id, {
           name,
           phone,
           whatsapp: whatsapp || phone,
           address,
-          relationshipWithProperty,
+          relationship_with_property: relationshipWithProperty,
           notes,
-          assignedAgentId,
-        }),
-      editingSeller
-        ? 'Seller record updated (last-contacted log preserved)'
-        : 'New seller registered'
-    );
-    if (ok) setSellerModalOpen(false);
+          assigned_agent_id: assignedAgentId,
+        });
+      } else {
+        await apiClient.createSeller({
+          name,
+          phone,
+          whatsapp: whatsapp || phone,
+          address,
+          relationship_with_property: relationshipWithProperty,
+          notes,
+          assigned_agent_id: assignedAgentId,
+        });
+      }
+      updateDb(
+        (prev) =>
+          crmService.upsertSeller(prev, {
+            id: editingSeller?.id,
+            name,
+            phone,
+            whatsapp: whatsapp || phone,
+            address,
+            relationshipWithProperty,
+            notes,
+            assignedAgentId,
+          }),
+        editingSeller
+          ? 'Seller record updated'
+          : 'New seller registered'
+      );
+      await refreshDb();
+      setSellerModalOpen(false);
+    } catch (err: any) {
+      notify(err.message || 'Failed to save seller', 'error');
+    }
   };
 
   return (
@@ -406,13 +433,20 @@ export const SellersPage: React.FC = () => {
         message={`Remove seller "${deletingSeller?.name}"? Sellers with existing linked properties cannot be deleted until their properties are reassigned or removed.`}
         confirmLabel="Delete Seller"
         onCancel={() => setDeletingSeller(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!deletingSeller) return;
-          updateDb(
-            (prev) => crmService.deleteSeller(prev, deletingSeller.id),
-            'Seller record removed'
-          );
-          setDeletingSeller(null);
+          try {
+            await apiClient.deleteSeller(deletingSeller.id);
+            updateDb(
+              (prev) => crmService.deleteSeller(prev, deletingSeller.id),
+              'Seller record removed'
+            );
+            await refreshDb();
+          } catch (err: any) {
+            notify(err.message || 'Failed to delete seller', 'error');
+          } finally {
+            setDeletingSeller(null);
+          }
         }}
       />
     </div>

@@ -8,10 +8,11 @@ from app.api.deps import (
     get_current_active_user,
     require_permission,
 )
+from app.core.permissions import Permission
 from app.database.session import get_db
 from app.models.models import Property, Seller, User
 from app.schemas.schemas import PaginatedResponse, PropertyResponse, SellerCreate, SellerResponse, SellerUpdate
-from app.services.services import create_seller, get_seller, list_sellers, update_seller
+from app.services.services import create_seller, get_seller, list_sellers, log_activity, update_seller
 
 router = APIRouter(prefix="/api/sellers", tags=["Sellers"])
 
@@ -76,4 +77,28 @@ def get_seller_properties(
     for p in props:
         p.days_listed = calculate_days_listed(p.listed_date, p.created_at)
     return props
+
+
+@router.delete("/{id}", response_model=dict)
+def delete_seller_endpoint(
+    id: str,
+    current_user: User = Depends(require_permission(Permission.SELLERS_DELETE.value)),
+    db: Session = Depends(get_db),
+):
+    seller = get_seller(db, id)
+    if not seller:
+        raise HTTPException(status_code=404, detail="Seller not found")
+    check_record_access(seller, current_user, owner_field="assigned_agent_id")
+    has_props = db.query(Property).filter(Property.seller_id == id).first()
+    if has_props:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete seller with linked properties. Please reassign or delete properties first.",
+        )
+    seller_code = seller.code
+    seller_name = seller.name
+    db.delete(seller)
+    log_activity(db, "Seller", id, "Deleted", f"Seller {seller_name} ({seller_code}) deleted", current_user.id)
+    db.commit()
+    return {"detail": "Seller deleted successfully", "id": id}
 

@@ -293,6 +293,8 @@ export const AdminSubmissionsPage: React.FC = () => {
                     <div key={m.id} className="rounded-xl border border-[#E4E3D8] overflow-hidden bg-[#FAF9F5]">
                       {m.mime_type.startsWith('image') ? (
                         <img src={m.url} alt={m.original_filename} className="w-full h-28 object-cover" />
+                      ) : m.mime_type.startsWith('video') || m.category === 'video' ? (
+                        <video controls src={m.url} className="w-full h-28 object-cover bg-black" />
                       ) : (
                         <div className="w-full h-28 flex items-center justify-center text-xs text-[#5E655B] p-2 text-center">
                           Document: {m.original_filename}

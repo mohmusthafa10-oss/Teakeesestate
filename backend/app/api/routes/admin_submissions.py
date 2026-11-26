@@ -1,3 +1,4 @@
+import threading
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from typing import List, Optional
 from sqlalchemy.orm import Session
@@ -126,8 +127,14 @@ def update_submission(
     return {"detail": "Submission updated"}
 
 def _transition_status(db: Session, sub: PropertySubmission, new_status: str, actor: User, comment: Optional[str] = None):
-    # Record status change in an audit log later – placeholder here
+    from app.services.services import log_activity
+    old_status = sub.status
     sub.status = new_status
+    db.flush()
+    summary = f"Submission status transitioned from '{old_status}' to '{new_status}' by {actor.name}"
+    if comment:
+        summary += f". Notes: {comment}"
+    log_activity(db, "PropertySubmission", sub.id, f"Status: {new_status}", summary, actor.id)
     db.commit()
 
 @router.post("/{submission_id}/approve", response_model=dict)
@@ -152,10 +159,11 @@ def reject_submission(
     sub = _get_submission(db, submission_id)
     if sub.status not in {SubmissionStatus.PENDING_REVIEW.value, SubmissionStatus.UNDER_REVIEW.value}:
         raise HTTPException(status_code=400, detail="Only pending/under-review submissions can be rejected")
-    # Store rejection reason in notes (simple implementation)
     sub.notes = f"Rejection reason: {reason}\n" + (sub.notes or "")
-    _transition_status(db, sub, SubmissionStatus.REJECTED.value, current_user)
+    _transition_status(db, sub, SubmissionStatus.REJECTED.value, current_user, f"Rejection reason: {reason}")
     return {"detail": "Submission rejected"}
+
+_conversion_lock = threading.Lock()
 
 @router.post("/{submission_id}/convert", response_model=dict)
 def convert_submission(
@@ -163,70 +171,143 @@ def convert_submission(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission(Permission.SUBMISSIONS_APPROVE.value)),
 ):
-    sub = _get_submission(db, submission_id)
-    if sub.status == SubmissionStatus.CONVERTED.value:
-        raise HTTPException(status_code=400, detail="Submission has already been converted")
-    if sub.status != SubmissionStatus.APPROVED.value:
-        raise HTTPException(status_code=400, detail="Only approved submissions can be converted")
-
-    from decimal import Decimal
-    from app.models.models import Property, PropertyImage, PropertyPublication
-    from app.services.services import generate_sequential_code, log_activity
-
-    try:
-        prop_code = generate_sequential_code(db, "TAK", pad=3, start=1)
-    except Exception:
-        import uuid
-        prop_code = f"TAK{uuid.uuid4().hex[:4].upper()}"
-
-    area_val = Decimal(str(sub.size)) if sub.size is not None else Decimal("0")
-    price_val = Decimal(str(sub.expected_price)) if sub.expected_price is not None else Decimal("0")
-
-    prop = Property(
-        code=prop_code,
-        title=sub.description[:100] if sub.description else f"{sub.type} in {sub.location}",
-        type=sub.type or "House",
-        category="Residential",
-        district=sub.location or "Wayanad",
-        panchayath=sub.location or "Kalpetta",
-        locality=sub.location,
-        area_value=area_val,
-        area_unit="Cents",
-        expected_price=price_val,
-        description=sub.description or "",
-        status="Active",
-        assigned_agent_id=sub.assigned_agent_id,
-        seller_id=None,
-    )
-    db.add(prop)
-    db.flush()
-
-    # Move media entries: link them as PropertyImage records
-    media_items = db.query(SubmissionMedia).filter(SubmissionMedia.submission_id == sub.id).order_by(SubmissionMedia.order).all()
-    for idx, m in enumerate(media_items):
-        img = PropertyImage(
-            property_id=prop.id,
-            url=f"/uploads/{m.storage_key}",
-            caption=m.original_filename or f"Image {idx + 1}",
-            is_primary=(idx == 0),
+    with _conversion_lock:
+        # Lock submission row for concurrency protection
+        sub = (
+            db.query(PropertySubmission)
+            .filter(PropertySubmission.id == submission_id)
+            .with_for_update()
+            .first()
         )
-        db.add(img)
+        if not sub:
+            raise HTTPException(status_code=404, detail="Submission not found")
+        if sub.status == SubmissionStatus.CONVERTED.value:
+            raise HTTPException(status_code=400, detail="Submission has already been converted")
+        if sub.status != SubmissionStatus.APPROVED.value:
+            raise HTTPException(status_code=400, detail="Only approved submissions can be converted")
 
-    # Initialize PropertyPublication record
-    publication = PropertyPublication(
-        property_id=prop.id,
-        is_published=False,
-    )
-    db.add(publication)
+        from decimal import Decimal
+        from app.models.models import Property, PropertyImage, PropertyPublication, Seller
+        from app.services.services import generate_sequential_code, log_activity
 
-    # Mark submission as converted
-    _transition_status(db, sub, SubmissionStatus.CONVERTED.value, current_user)
-    log_activity(db, "Property", prop.id, "Converted", f"Property {prop.code} converted from submission {sub.reference}", current_user.id)
-    db.commit()
-    db.refresh(prop)
+        clean_phone = sub.phone.strip()
+        # Find existing seller by phone or create a new normalized seller record
+        existing_seller = db.query(Seller).filter(Seller.phone == clean_phone).first()
+        if existing_seller:
+            seller_id = existing_seller.id
+        else:
+            try:
+                seller_code = generate_sequential_code(db, "SLR", pad=4, start=1001)
+            except Exception:
+                import uuid
+                seller_code = f"SLR{uuid.uuid4().hex[:4].upper()}"
 
-    return {
-        "detail": "Submission converted to property",
-        "property_id": prop.id,
-        "property_code": prop.code,
-    }
+            new_seller = Seller(
+                code=seller_code,
+                name=sub.seller_name.strip(),
+                phone=clean_phone,
+                relationship_with_property="Owner",
+                address=sub.location.strip() if sub.location else None,
+                notes=f"Auto-created during property submission {sub.reference} conversion",
+                assigned_agent_id=sub.assigned_agent_id,
+            )
+            db.add(new_seller)
+            db.flush()
+            seller_id = new_seller.id
+            log_activity(
+                db,
+                "Seller",
+                new_seller.id,
+                "Created",
+                f"Seller {new_seller.code} ({new_seller.name}) created from submission {sub.reference}",
+                current_user.id,
+            )
+
+        # Sequential property code
+        try:
+            prop_code = generate_sequential_code(db, "TAK", pad=3, start=1)
+        except Exception:
+            import uuid
+            prop_code = f"TAK{uuid.uuid4().hex[:4].upper()}"
+
+        area_val = Decimal(str(sub.size)) if sub.size is not None else Decimal("0")
+        price_val = Decimal(str(sub.expected_price)) if sub.expected_price is not None else Decimal("0")
+
+        # Map category based on property type
+        raw_type = (sub.type or "").strip().lower()
+        if any(k in raw_type for k in ("commercial", "shop", "office", "retail")):
+            category = "Commercial"
+        elif any(k in raw_type for k in ("plantation", "estate", "agriculture", "farm")):
+            category = "Plantation"
+        elif any(k in raw_type for k in ("resort", "hotel", "homestay")):
+            category = "Resort"
+        else:
+            category = "Residential"
+
+        # Preserve bedrooms and bathrooms in description and features
+        features_list = []
+        if sub.bedrooms:
+            features_list.append(f"{sub.bedrooms} BHK")
+        if sub.bathrooms:
+            features_list.append(f"{sub.bathrooms} Bathrooms")
+        features_text = ", ".join(features_list)
+
+        full_desc = sub.description or ""
+        if features_text and features_text not in full_desc:
+            full_desc = f"{features_text}. {full_desc}".strip()
+
+        prop = Property(
+            code=prop_code,
+            title=sub.description[:100] if sub.description else f"{sub.type} in {sub.location}",
+            type=sub.type or "House",
+            category=category,
+            district=sub.location or "Wayanad",
+            panchayath=sub.location or "Kalpetta",
+            locality=sub.location,
+            area_value=area_val,
+            area_unit="Cents",
+            bedrooms=sub.bedrooms,
+            bathrooms=sub.bathrooms,
+            other_features=features_text if features_text else None,
+            expected_price=price_val,
+            description=full_desc,
+            status="Active",
+            assigned_agent_id=sub.assigned_agent_id,
+            seller_id=seller_id,
+        )
+        db.add(prop)
+        db.flush()
+
+        # Move media entries: link them as PropertyImage records with media_type and mime_type
+        media_items = db.query(SubmissionMedia).filter(SubmissionMedia.submission_id == sub.id).order_by(SubmissionMedia.order).all()
+        for idx, m in enumerate(media_items):
+            m_type = m.category or ("video" if "video" in (m.mime_type or "").lower() else "photo")
+            img = PropertyImage(
+                property_id=prop.id,
+                url=f"/uploads/{m.storage_key}",
+                caption=m.original_filename or f"Media {idx + 1}",
+                is_primary=(idx == 0 and m_type != "video"),
+                media_type=m_type,
+                mime_type=m.mime_type,
+            )
+            db.add(img)
+
+        # Initialize PropertyPublication record (unpublished by default)
+        publication = PropertyPublication(
+            property_id=prop.id,
+            is_published=False,
+        )
+        db.add(publication)
+
+        # Mark submission as converted
+        _transition_status(db, sub, SubmissionStatus.CONVERTED.value, current_user, f"Converted to Property {prop.code}")
+        log_activity(db, "Property", prop.id, "Converted", f"Property {prop.code} converted from submission {sub.reference}", current_user.id)
+        db.commit()
+        db.refresh(prop)
+
+        return {
+            "detail": "Submission converted to property",
+            "property_id": prop.id,
+            "property_code": prop.code,
+            "seller_id": seller_id,
+        }

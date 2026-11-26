@@ -4,17 +4,18 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_active_user, require_permission
+from app.core.permissions import Permission
 from app.database.session import get_db
 from app.models.models import Property, RentalBooking, User
 from app.schemas.schemas import RentalBookingCreate, RentalBookingResponse, RentalBookingUpdate
-from app.services.services import generate_sequential_code
+from app.services.services import generate_sequential_code, log_activity
 
 router = APIRouter(prefix="/api/rentals", tags=["Stay & Rentals"])
 
 @router.get("", response_model=List[RentalBookingResponse])
 def get_rentals(
     property_id: Optional[str] = None,
-    current_user: User = Depends(require_permission("properties.read")),
+    current_user: User = Depends(require_permission(Permission.RENTALS_READ.value)),
     db: Session = Depends(get_db),
 ):
     query = db.query(RentalBooking)
@@ -25,7 +26,7 @@ def get_rentals(
 @router.post("", response_model=RentalBookingResponse, status_code=status.HTTP_201_CREATED)
 def create_rental_booking(
     data: RentalBookingCreate,
-    current_user: User = Depends(require_permission("properties.create")),
+    current_user: User = Depends(require_permission(Permission.RENTALS_CREATE.value)),
     db: Session = Depends(get_db),
 ):
     if current_user.role == "Agent":
@@ -61,7 +62,7 @@ def create_rental_booking(
 def update_rental_booking(
     id: str,
     data: RentalBookingUpdate,
-    current_user: User = Depends(require_permission("properties.update")),
+    current_user: User = Depends(require_permission(Permission.RENTALS_UPDATE.value)),
     db: Session = Depends(get_db),
 ):
     booking = db.query(RentalBooking).filter(RentalBooking.id == id).first()
@@ -79,4 +80,33 @@ def update_rental_booking(
     db.commit()
     db.refresh(booking)
     return booking
+
+@router.delete("/{id}", response_model=dict)
+def delete_rental_booking(
+    id: str,
+    current_user: User = Depends(require_permission(Permission.RENTALS_DELETE.value)),
+    db: Session = Depends(get_db),
+):
+    booking = db.query(RentalBooking).filter(RentalBooking.id == id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if current_user.role == "Agent":
+        prop = db.query(Property).filter(Property.id == booking.property_id).first()
+        if prop and prop.assigned_agent_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: Rental booking is for another agent's property",
+            )
+    log_activity(
+        db,
+        "Rental",
+        booking.id,
+        "Deleted",
+        f"Deleted rental booking {booking.code}",
+        current_user.id,
+    )
+    db.delete(booking)
+    db.commit()
+    return {"detail": "Rental booking deleted successfully", "id": id}
+
 

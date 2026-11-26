@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { CONTACT_METHODS, crmService } from '../services/crmService';
+import { apiClient } from '../services/apiClient';
 import { ContactMethod, FollowUp, FollowUpActivityType } from '../types/crm';
 import { formatDate, getTodayISO, offsetDaysISO } from '../utils/formatters';
 import {
@@ -22,7 +23,7 @@ import {
 type FollowUpCategory = 'Today' | 'Overdue' | 'Upcoming' | 'Completed';
 
 export const FollowUpsPage: React.FC = () => {
-  const { db, currentUser, route, navigate, updateDb, visibleFollowUps } = useCRM();
+  const { db, currentUser, route, navigate, updateDb, visibleFollowUps, notify, refreshDb } = useCRM();
   const today = getTodayISO();
 
   const [category, setCategory] = useState<FollowUpCategory>(
@@ -513,12 +514,18 @@ export const FollowUpsPage: React.FC = () => {
                           </button>
                           <button
                             type="button"
-                            onClick={() =>
-                              updateDb(
-                                (prev) => crmService.deleteFollowUp(prev, fup.id),
-                                'Follow-up deleted'
-                              )
-                            }
+                            onClick={async () => {
+                              try {
+                                await apiClient.deleteFollowUp(fup.id);
+                                updateDb(
+                                  (prev) => crmService.deleteFollowUp(prev, fup.id),
+                                  'Follow-up deleted'
+                                );
+                                await refreshDb();
+                              } catch (err: any) {
+                                notify(err.message || 'Failed to delete follow-up', 'error');
+                              }
+                            }}
                             title="Delete Follow-up"
                             className="p-1.5 rounded-md hover:bg-[#C96C60]/15 text-[#C96C60] cursor-pointer"
                           >
@@ -542,26 +549,47 @@ export const FollowUpsPage: React.FC = () => {
         title={editing ? 'Edit Follow-up' : 'Create Follow-up Reminder'}
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             if (!title.trim() || !relatedId) return;
-            updateDb(
-              (prev) =>
-                crmService.upsertFollowUp(prev, {
-                  id: editing?.id,
-                  title,
-                  relatedType,
-                  relatedId,
-                  propertyId: propertyId || undefined,
-                  assignedAgentId,
-                  date,
-                  time,
-                  activityType,
-                  notes,
-                }),
-              editing ? 'Follow-up updated' : 'Follow-up scheduled'
-            );
-            setModalOpen(false);
+            try {
+              const payload = {
+                title,
+                related_type: relatedType,
+                related_id: relatedId,
+                property_id: propertyId || undefined,
+                assigned_agent_id: assignedAgentId,
+                date,
+                time,
+                activity_type: activityType,
+                notes,
+              };
+              if (editing) {
+                await apiClient.updateFollowUp(editing.id, payload);
+              } else {
+                await apiClient.createFollowUp(payload);
+              }
+              updateDb(
+                (prev) =>
+                  crmService.upsertFollowUp(prev, {
+                    id: editing?.id,
+                    title,
+                    relatedType,
+                    relatedId,
+                    propertyId: propertyId || undefined,
+                    assignedAgentId,
+                    date,
+                    time,
+                    activityType,
+                    notes,
+                  }),
+                editing ? 'Follow-up updated' : 'Follow-up scheduled'
+              );
+              await refreshDb();
+              setModalOpen(false);
+            } catch (err: any) {
+              notify(err.message || 'Failed to save follow-up', 'error');
+            }
           }}
           className="space-y-4"
         >
@@ -715,30 +743,43 @@ export const FollowUpsPage: React.FC = () => {
         maxWidthClass="max-w-lg"
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             if (!completing) return;
-            updateDb(
-              (prev) =>
-                crmService.completeFollowUp(
-                  prev,
-                  completing.id,
-                  completionNotes,
-                  scheduleNext
-                    ? {
-                        date: nextDate,
-                        time: '10:30',
-                        title: nextTitle,
-                        activityType: nextType,
-                      }
-                    : undefined,
-                  contactMethod
-                ),
-              scheduleNext
-                ? 'Follow-up completed, Last Contacted updated & next reminder scheduled'
-                : 'Follow-up completed & Last Contacted updated'
-            );
-            setCompleting(null);
+            try {
+              await apiClient.completeFollowUp(completing.id, {
+                notes: completionNotes,
+                contact_method: contactMethod,
+                next_date: scheduleNext ? nextDate : undefined,
+                next_time: scheduleNext ? '10:30' : undefined,
+                next_title: scheduleNext ? nextTitle : undefined,
+                next_type: scheduleNext ? nextType : undefined,
+              });
+              updateDb(
+                (prev) =>
+                  crmService.completeFollowUp(
+                    prev,
+                    completing.id,
+                    completionNotes,
+                    scheduleNext
+                      ? {
+                          date: nextDate,
+                          time: '10:30',
+                          title: nextTitle,
+                          activityType: nextType,
+                        }
+                      : undefined,
+                    contactMethod
+                  ),
+                scheduleNext
+                  ? 'Follow-up completed, Last Contacted updated & next reminder scheduled'
+                  : 'Follow-up completed & Last Contacted updated'
+              );
+              await refreshDb();
+              setCompleting(null);
+            } catch (err: any) {
+              notify(err.message || 'Failed to complete follow-up', 'error');
+            }
           }}
           className="space-y-4"
         >

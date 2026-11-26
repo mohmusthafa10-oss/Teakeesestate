@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, desc, func, or_, select
+from sqlalchemy import and_, desc, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app.core.security import get_password_hash
@@ -63,20 +63,28 @@ _sequence_lock = threading.Lock()
 
 def generate_sequential_code(db: Session, prefix: str, pad: int = 3, start: int = 1) -> str:
     """
-    Generate thread-safe sequential identifiers like TAK001, SLR-1001, LED-1001, DL-1001.
-    Uses SequenceCounter table with row-level atomic increment and thread lock.
+    Generate thread-safe and multi-worker safe sequential identifiers like TAK001, SLR-1001, LED-1001, DL-1001.
+    Uses atomic database-level UPSERT and UPDATE ... RETURNING to prevent collisions across processes and threads.
     """
     with _sequence_lock:
-        counter = db.query(SequenceCounter).filter(SequenceCounter.prefix == prefix).with_for_update().first()
-        if not counter:
-            counter = SequenceCounter(prefix=prefix, current_value=start)
-            db.add(counter)
-            db.commit()
-            num = start
-        else:
-            counter.current_value += 1
-            db.commit()
-            num = counter.current_value
+        db.execute(
+            text(
+                "INSERT INTO sequence_counters (id, prefix, current_value) "
+                "VALUES (:id, :prefix, :start) "
+                "ON CONFLICT (prefix) DO NOTHING"
+            ),
+            {"id": str(uuid.uuid4()), "prefix": prefix, "start": start - 1},
+        )
+        num = db.execute(
+            text(
+                "UPDATE sequence_counters "
+                "SET current_value = current_value + 1 "
+                "WHERE prefix = :prefix "
+                "RETURNING current_value"
+            ),
+            {"prefix": prefix},
+        ).scalar()
+        db.flush()
 
     if prefix == "TAK":
         return f"{prefix}{str(num).zfill(pad)}"
@@ -212,6 +220,8 @@ def create_property(db: Session, data: PropertyCreate, actor_id: Optional[str] =
         google_maps_url=data.google_maps_url,
         area_value=data.area_value,
         area_unit=data.area_unit,
+        bedrooms=data.bedrooms,
+        bathrooms=data.bathrooms,
         road_connectivity=data.road_connectivity,
         distance_to_highway=data.distance_to_highway,
         nearby_landmarks=data.nearby_landmarks,
@@ -249,6 +259,8 @@ def create_property(db: Session, data: PropertyCreate, actor_id: Optional[str] =
                 url=img.url,
                 caption=img.caption,
                 is_primary=img.is_primary,
+                media_type=getattr(img, "media_type", "photo") or "photo",
+                mime_type=getattr(img, "mime_type", None),
             ))
 
     if data.documents:
@@ -400,6 +412,8 @@ def register_seller_and_property(db: Session, req: CombinedRegistrationRequest, 
             google_maps_url=req.property.google_maps_url,
             area_value=req.property.area_value,
             area_unit=req.property.area_unit,
+            bedrooms=req.property.bedrooms,
+            bathrooms=req.property.bathrooms,
             road_connectivity=req.property.road_connectivity,
             distance_to_highway=req.property.distance_to_highway,
             nearby_landmarks=req.property.nearby_landmarks,
@@ -437,6 +451,8 @@ def register_seller_and_property(db: Session, req: CombinedRegistrationRequest, 
                     url=img.url,
                     caption=img.caption,
                     is_primary=img.is_primary,
+                    media_type=getattr(img, "media_type", "photo") or "photo",
+                    mime_type=getattr(img, "mime_type", None),
                 ))
 
         advance_record = None

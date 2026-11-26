@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Eye, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { crmService } from '../services/crmService';
+import { apiClient } from '../services/apiClient';
 import { Lead, LeadStatus, PropertyCategory, PropertyType } from '../types/crm';
 import {
   formatCurrency,
@@ -18,7 +19,7 @@ import {
 } from '../components/common/UIPrimitives';
 
 export const LeadsPage: React.FC = () => {
-  const { db, currentUser, route, navigate, updateDb, visibleLeads } = useCRM();
+  const { db, currentUser, route, navigate, updateDb, visibleLeads, notify, refreshDb } = useCRM();
   const currency = db.settings.currencySymbol;
 
   const [search, setSearch] = useState('');
@@ -132,33 +133,59 @@ export const LeadsPage: React.FC = () => {
   const getAgentName = (id: string) =>
     db.users.find((u) => u.id === id)?.name || 'Unassigned';
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !phone.trim()) return;
-    const ok = updateDb(
-      (prev) =>
-        crmService.upsertLead(prev, {
-          id: editingLead?.id,
-          name,
-          phone,
-          whatsapp: whatsapp || phone,
-          leadSource,
-          preferredLocation,
-          minBudget: Number(minBudget) || 0,
-          maxBudget: Number(maxBudget) || 0,
-          propertyType,
-          propertyCategory,
-          requirementDescription,
-          assignedAgentId,
-          status,
-          nextFollowUpDate,
-          notes,
-        }),
-      editingLead
-        ? 'Lead details updated (last-contacted log preserved)'
-        : 'Buyer lead registered'
-    );
-    if (ok) setLeadModalOpen(false);
+    try {
+      const payload = {
+        name,
+        phone,
+        whatsapp: whatsapp || phone,
+        lead_source: leadSource,
+        preferred_location: preferredLocation,
+        min_budget: Number(minBudget) || 0,
+        max_budget: Number(maxBudget) || 0,
+        property_type: propertyType,
+        property_category: propertyCategory,
+        requirement_description: requirementDescription,
+        assigned_agent_id: assignedAgentId,
+        status,
+        next_follow_up_date: nextFollowUpDate,
+        notes,
+      };
+      if (editingLead) {
+        await apiClient.updateLead(editingLead.id, payload);
+      } else {
+        await apiClient.createLead(payload);
+      }
+      updateDb(
+        (prev) =>
+          crmService.upsertLead(prev, {
+            id: editingLead?.id,
+            name,
+            phone,
+            whatsapp: whatsapp || phone,
+            leadSource,
+            preferredLocation,
+            minBudget: Number(minBudget) || 0,
+            maxBudget: Number(maxBudget) || 0,
+            propertyType,
+            propertyCategory,
+            requirementDescription,
+            assignedAgentId,
+            status,
+            nextFollowUpDate,
+            notes,
+          }),
+        editingLead
+          ? 'Lead details updated'
+          : 'Buyer lead registered'
+      );
+      await refreshDb();
+      setLeadModalOpen(false);
+    } catch (err: any) {
+      notify(err.message || 'Failed to save lead', 'error');
+    }
   };
 
   return (
@@ -599,13 +626,20 @@ export const LeadsPage: React.FC = () => {
         message={`Remove lead "${deletingLead?.name}" and their property match history?`}
         confirmLabel="Delete Lead"
         onCancel={() => setDeletingLead(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!deletingLead) return;
-          updateDb(
-            (prev) => crmService.deleteLead(prev, deletingLead.id),
-            'Lead removed'
-          );
-          setDeletingLead(null);
+          try {
+            await apiClient.deleteLead(deletingLead.id);
+            updateDb(
+              (prev) => crmService.deleteLead(prev, deletingLead.id),
+              'Lead removed'
+            );
+            await refreshDb();
+          } catch (err: any) {
+            notify(err.message || 'Failed to delete lead', 'error');
+          } finally {
+            setDeletingLead(null);
+          }
         }}
       />
     </div>

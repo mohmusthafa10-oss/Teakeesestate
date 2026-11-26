@@ -8,10 +8,11 @@ from app.api.deps import (
     get_current_active_user,
     require_permission,
 )
+from app.core.permissions import Permission
 from app.database.session import get_db
 from app.models.models import Deal, User
 from app.schemas.schemas import DealCreate, DealResponse, DealUpdate, PaginatedResponse
-from app.services.services import create_deal, update_deal
+from app.services.services import create_deal, log_activity, update_deal
 
 router = APIRouter(prefix="/api/deals", tags=["Deals"])
 
@@ -65,4 +66,21 @@ def update_deal_status(
     check_reassignment_permission(data, current_user)
     deal = update_deal(db, id, data, current_user.id)
     return deal
+
+
+@router.delete("/{id}", response_model=dict)
+def delete_deal_endpoint(
+    id: str,
+    current_user: User = Depends(require_permission(Permission.DEALS_DELETE.value)),
+    db: Session = Depends(get_db),
+):
+    deal = db.query(Deal).filter(Deal.id == id).first()
+    if not deal:
+        raise HTTPException(status_code=404, detail="Deal not found")
+    check_record_access(deal, current_user, owner_field="assigned_agent_id")
+    code = deal.code
+    db.delete(deal)
+    log_activity(db, "Deal", id, "Deleted", f"Deal {code} deleted", current_user.id)
+    db.commit()
+    return {"detail": "Deal deleted successfully", "id": id}
 

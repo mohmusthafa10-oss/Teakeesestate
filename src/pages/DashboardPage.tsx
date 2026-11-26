@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { crmService } from '../services/crmService';
+import { apiClient } from '../services/apiClient';
 import {
   calculateDaysSince,
   formatCurrency,
@@ -31,6 +32,8 @@ export const DashboardPage: React.FC = () => {
     visibleSellers,
     visibleFollowUps,
     visibleDeals,
+    notify,
+    refreshDb,
   } = useCRM();
 
   const today = getTodayISO();
@@ -643,17 +646,25 @@ export const DashboardPage: React.FC = () => {
                         <td className="py-3 px-4 text-right">
                           <button
                             type="button"
-                            onClick={() =>
-                              updateDb(
-                                (prev) =>
-                                  crmService.completeFollowUp(
-                                    prev,
-                                    fup.id,
-                                    'Completed from executive dashboard.'
-                                  ),
-                                'Follow-up marked as completed'
-                              )
-                            }
+                            onClick={async () => {
+                              try {
+                                await apiClient.completeFollowUp(fup.id, {
+                                  notes: 'Completed from executive dashboard.',
+                                });
+                                updateDb(
+                                  (prev) =>
+                                    crmService.completeFollowUp(
+                                      prev,
+                                      fup.id,
+                                      'Completed from executive dashboard.'
+                                    ),
+                                  'Follow-up marked as completed'
+                                );
+                                await refreshDb();
+                              } catch (err: any) {
+                                notify(err.message || 'Failed to complete follow-up', 'error');
+                              }
+                            }}
                             className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#E4EBE0] hover:bg-[#064E3B] text-[#064E3B] hover:text-[#FFFFFF] text-[11px] font-medium transition-colors cursor-pointer"
                           >
                             <Check className="w-3 h-3" />

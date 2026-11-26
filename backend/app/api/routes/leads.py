@@ -8,10 +8,11 @@ from app.api.deps import (
     get_current_active_user,
     require_permission,
 )
+from app.core.permissions import Permission
 from app.database.session import get_db
 from app.models.models import User
 from app.schemas.schemas import LeadCreate, LeadResponse, LeadUpdate, PaginatedResponse
-from app.services.services import create_lead, find_matching_properties, get_lead, list_leads, update_lead
+from app.services.services import create_lead, find_matching_properties, get_lead, list_leads, log_activity, update_lead
 
 router = APIRouter(prefix="/api/leads", tags=["Leads"])
 
@@ -75,4 +76,22 @@ def get_matches_for_lead(
         raise HTTPException(status_code=404, detail="Lead not found")
     check_record_access(lead, current_user)
     return find_matching_properties(db, id)
+
+
+@router.delete("/{id}", response_model=dict)
+def delete_lead_endpoint(
+    id: str,
+    current_user: User = Depends(require_permission(Permission.LEADS_DELETE.value)),
+    db: Session = Depends(get_db),
+):
+    lead = get_lead(db, id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    check_record_access(lead, current_user, owner_field="assigned_agent_id")
+    lead_code = lead.code
+    lead_name = lead.name
+    db.delete(lead)
+    log_activity(db, "Lead", id, "Deleted", f"Lead {lead_name} ({lead_code}) deleted", current_user.id)
+    db.commit()
+    return {"detail": "Lead deleted successfully", "id": id}
 

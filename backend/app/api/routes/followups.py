@@ -8,6 +8,7 @@ from app.api.deps import (
     get_current_active_user,
     require_permission,
 )
+from app.core.permissions import Permission
 from app.database.session import get_db
 from app.models.models import FollowUp, User
 from app.schemas.schemas import (
@@ -17,7 +18,7 @@ from app.schemas.schemas import (
     FollowUpUpdate,
     PaginatedResponse,
 )
-from app.services.services import complete_followup, create_followup, list_followups
+from app.services.services import complete_followup, create_followup, list_followups, log_activity
 
 router = APIRouter(prefix="/api/followups", tags=["Follow-ups"])
 
@@ -75,4 +76,21 @@ def complete_followup_endpoint(
     if not res:
         raise HTTPException(status_code=404, detail="Follow-up not found")
     return res
+
+
+@router.delete("/{id}", response_model=dict)
+def delete_followup_endpoint(
+    id: str,
+    current_user: User = Depends(require_permission(Permission.FOLLOWUPS_DELETE.value)),
+    db: Session = Depends(get_db),
+):
+    fup = db.query(FollowUp).filter(FollowUp.id == id).first()
+    if not fup:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+    check_record_access(fup, current_user, owner_field="assigned_agent_id")
+    title = fup.title
+    db.delete(fup)
+    log_activity(db, "FollowUp", id, "Deleted", f"Follow-up '{title}' deleted", current_user.id)
+    db.commit()
+    return {"detail": "Follow-up deleted successfully", "id": id}
 

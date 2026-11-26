@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,8 +13,16 @@ from app.api.deps import (
 )
 from app.core.permissions import Permission
 from app.database.session import get_db
-from app.models.models import PriceHistory, Property, PropertyMatch, PropertyPublication, User
-from app.schemas.schemas import PaginatedResponse, PriceHistoryResponse, PropertyCreate, PropertyResponse, PropertyUpdate
+from app.models.models import PriceHistory, Property, PropertyImage, PropertyMatch, PropertyPublication, User
+from app.schemas.schemas import (
+    PaginatedResponse,
+    PriceHistoryResponse,
+    PropertyCreate,
+    PropertyImageCreate,
+    PropertyImageResponse,
+    PropertyResponse,
+    PropertyUpdate,
+)
 from app.services.services import (
     calculate_days_listed,
     create_property,
@@ -240,4 +249,69 @@ def get_property_price_history(
         raise HTTPException(status_code=404, detail="Property not found")
     check_record_access(prop, current_user)
     return db.query(PriceHistory).filter(PriceHistory.property_id == id).order_by(PriceHistory.created_at.desc()).all()
+
+
+@router.delete("/{id}", response_model=dict)
+def delete_property_endpoint(
+    id: str,
+    current_user: User = Depends(require_permission(Permission.PROPERTIES_DELETE.value)),
+    db: Session = Depends(get_db),
+):
+    prop = get_property(db, id)
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    check_record_access(prop, current_user)
+    code = prop.code
+    title = prop.title
+    db.delete(prop)
+    log_activity(db, "Property", id, "Deleted", f"Property {title} ({code}) deleted", current_user.id)
+    db.commit()
+    return {"detail": "Property deleted successfully", "id": id}
+
+
+@router.post("/{id}/media", response_model=PropertyImageResponse, status_code=status.HTTP_201_CREATED)
+def add_property_media(
+    id: str,
+    data: PropertyImageCreate,
+    current_user: User = Depends(require_permission(Permission.PROPERTIES_UPDATE.value)),
+    db: Session = Depends(get_db),
+):
+    prop = get_property(db, id)
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    check_record_access(prop, current_user)
+    img = PropertyImage(
+        id=str(uuid.uuid4()),
+        property_id=id,
+        url=data.url,
+        caption=data.caption,
+        is_primary=data.is_primary,
+        media_type=data.media_type,
+        mime_type=data.mime_type,
+    )
+    db.add(img)
+    log_activity(db, "Property", id, "Media Added", f"Added {data.media_type} to property {prop.code}", current_user.id)
+    db.commit()
+    db.refresh(img)
+    return img
+
+
+@router.delete("/{id}/media/{media_id}", response_model=dict)
+def delete_property_media(
+    id: str,
+    media_id: str,
+    current_user: User = Depends(require_permission(Permission.PROPERTIES_UPDATE.value)),
+    db: Session = Depends(get_db),
+):
+    prop = get_property(db, id)
+    if not prop:
+        raise HTTPException(status_code=404, detail="Property not found")
+    check_record_access(prop, current_user)
+    img = db.query(PropertyImage).filter(PropertyImage.id == media_id, PropertyImage.property_id == id).first()
+    if not img:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    db.delete(img)
+    log_activity(db, "Property", id, "Media Deleted", f"Removed media {media_id} from property {prop.code}", current_user.id)
+    db.commit()
+    return {"detail": "Media deleted successfully", "id": media_id}
 

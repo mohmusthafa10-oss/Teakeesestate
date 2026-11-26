@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp, FilePlus2, ImagePlus, Plus, Trash2, Upload } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
+import { apiClient } from '../services/apiClient';
 import {
   ADVANCE_PAYMENT_METHODS,
   crmService,
@@ -205,6 +206,80 @@ export const AddSellerPropertyPage: React.FC = () => {
 
     await withLoader(async () => {
       let createdPropertyId = '';
+
+      // If authenticated with backend, persist to central database
+      if (localStorage.getItem('crm_access_token')) {
+        try {
+          const payload = {
+            mode: sellerMode,
+            existing_seller_id: sellerMode === 'existing-seller' ? existingSellerId : undefined,
+            seller:
+              sellerMode === 'new-seller'
+                ? {
+                    name: sellerName.trim(),
+                    phone: sellerPhone.trim(),
+                    whatsapp: (sellerWhatsapp || sellerPhone).trim(),
+                    address: sellerAddress.trim() || undefined,
+                    relationship_with_property: relationshipWithProperty,
+                    assigned_agent_id: assignedAgentId || currentUser.id,
+                  }
+                : undefined,
+            property: {
+              title: title.trim(),
+              type,
+              category,
+              district: district.trim(),
+              panchayath: panchayath.trim(),
+              locality: locality.trim() || undefined,
+              full_address: fullAddress.trim() || undefined,
+              google_maps_url: googleMapsUrl.trim() || undefined,
+              area_value: Number(areaValue),
+              area_unit: areaUnit,
+              seller_id: sellerMode === 'existing-seller' ? existingSellerId : '',
+              expected_price: Number(expectedPrice),
+              market_price: marketPrice ? Number(marketPrice) : undefined,
+              description: description.trim() || undefined,
+              seller_relationship: relationshipWithProperty,
+              assigned_agent_id: assignedAgentId || currentUser.id,
+              status,
+              road_connectivity: roadConnectivity.trim() || undefined,
+              distance_to_highway: distanceToHighway.trim() || undefined,
+              nearby_landmarks: nearbyLandmarks.trim() || undefined,
+              water_availability: waterAvailability.trim() || undefined,
+              terrain: terrain.trim() || undefined,
+              frontage: frontage.trim() || undefined,
+              electricity: electricity.trim() || undefined,
+              boundary_details: boundaryDetails.trim() || undefined,
+              other_features: otherFeatures.trim() || undefined,
+              internal_notes: internalNotes.trim() || undefined,
+              latitude: latitude ?? undefined,
+              longitude: longitude ?? undefined,
+              location_accuracy: locationAccuracy ?? undefined,
+              images: images.map((img, idx) => ({
+                url: img.url,
+                caption: img.caption || 'Property Image',
+                is_primary: idx === 0,
+              })),
+            },
+            advance: advanceCollected
+              ? {
+                  amount: Number(advanceAmount),
+                  collection_date: advanceDate || undefined,
+                  payment_method: advanceMethod,
+                  transaction_reference: advanceRef || undefined,
+                  remarks: advanceRemarks || undefined,
+                }
+              : undefined,
+          };
+
+          const apiRes = await apiClient.registerSellerAndProperty(payload);
+          createdPropertyId = apiRes.property.id;
+        } catch (apiErr: any) {
+          setErrorMsg(apiErr.message || 'Failed to register property with backend database.');
+          return;
+        }
+      }
+
       const ok = updateDb((prev) => {
         const res = crmService.registerSellerAndProperty(prev, {
           mode: sellerMode,
@@ -265,11 +340,13 @@ export const AddSellerPropertyPage: React.FC = () => {
               }
             : undefined,
         });
-        createdPropertyId = res.property.id;
+        if (!createdPropertyId) {
+          createdPropertyId = res.property.id;
+        }
         return res.db;
       }, `Seller & Property (${nextPropertyCode}) registered across CRM`);
 
-      if (ok && createdPropertyId) {
+      if (createdPropertyId) {
         navigate({ page: 'property-detail', id: createdPropertyId });
       }
     }, 360);

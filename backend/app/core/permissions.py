@@ -29,6 +29,11 @@ class Permission(str, Enum):
     DEALS_UPDATE = "deals.update"
     DEALS_DELETE = "deals.delete"
 
+    RENTALS_CREATE = "rentals.create"
+    RENTALS_READ = "rentals.read"
+    RENTALS_UPDATE = "rentals.update"
+    RENTALS_DELETE = "rentals.delete"
+
     FINANCE_READ = "finance.read"
     FINANCE_MANAGE = "finance.manage"
 
@@ -61,10 +66,18 @@ ROLE_PERMISSIONS: Dict[str, Set[str]] = {
         Permission.DEALS_CREATE.value,
         Permission.DEALS_READ.value,
         Permission.DEALS_UPDATE.value,
+        Permission.RENTALS_CREATE.value,
+        Permission.RENTALS_READ.value,
+        Permission.RENTALS_UPDATE.value,
         Permission.REPORTS_READ.value,
     },
     "Telecaller": {
-        Permission.SUBMISSIONS_CREATE.value,
+        Permission.SELLERS_CREATE.value,
+        Permission.SELLERS_READ.value,
+        Permission.SELLERS_UPDATE.value,
+        Permission.PROPERTIES_CREATE.value,
+        Permission.PROPERTIES_READ.value,
+        Permission.PROPERTIES_UPDATE.value,
         Permission.SUBMISSIONS_READ.value,
     }
 }

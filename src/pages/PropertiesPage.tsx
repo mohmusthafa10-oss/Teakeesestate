@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { crmService } from '../services/crmService';
+import { apiClient } from '../services/apiClient';
 import { Property, PropertyCategory, PropertyStatus, PropertyType } from '../types/crm';
 import {
   calculateDaysSince,
@@ -35,7 +36,7 @@ import { LocationPickerMap } from '../components/map/LocationPickerMap';
 import { getPropertyCoords, hasValidCoordinates } from '../utils/geo';
 
 export const PropertiesPage: React.FC = () => {
-  const { db, route, navigate, updateDb, visibleProperties } = useCRM();
+  const { db, route, navigate, updateDb, visibleProperties, notify, refreshDb } = useCRM();
   const currency = db.settings.currencySymbol;
 
   const [viewMode, setViewMode] = useState<'table' | 'card' | 'map'>('table');
@@ -539,15 +540,22 @@ export const PropertiesPage: React.FC = () => {
                       <td className="py-3 px-3">
                         <select
                           value={prop.status}
-                          onChange={(e) =>
-                            updateDb(
-                              (prev) =>
-                                crmService.updateProperty(prev, prop.id, {
-                                  status: e.target.value as PropertyStatus,
-                                }),
-                              `Status changed to ${e.target.value}`
-                            )
-                          }
+                          onChange={async (e) => {
+                            const newStatus = e.target.value as PropertyStatus;
+                            try {
+                              await apiClient.updateProperty(prop.id, { status: newStatus });
+                              updateDb(
+                                (prev) =>
+                                  crmService.updateProperty(prev, prop.id, {
+                                    status: newStatus,
+                                  }),
+                                `Status changed to ${newStatus}`
+                              );
+                              await refreshDb();
+                            } catch (err: any) {
+                              notify(err.message || 'Failed to update property status', 'error');
+                            }
+                          }}
                           aria-label={`Change status for ${prop.title}`}
                           className="h-7 px-2 text-[11px] font-medium bg-[#F1F0E8]/70 border border-[#E5E4DA] rounded-md cursor-pointer"
                         >
@@ -826,13 +834,20 @@ export const PropertiesPage: React.FC = () => {
         message={`Are you sure you want to remove "${deletingProperty?.title}"? Linked follow-ups and matches for this property will also be removed.`}
         confirmLabel="Delete Property"
         onCancel={() => setDeletingProperty(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!deletingProperty) return;
-          updateDb(
-            (prev) => crmService.deleteProperty(prev, deletingProperty.id),
-            'Property record removed'
-          );
-          setDeletingProperty(null);
+          try {
+            await apiClient.deleteProperty(deletingProperty.id);
+            updateDb(
+              (prev) => crmService.deleteProperty(prev, deletingProperty.id),
+              'Property record removed'
+            );
+            await refreshDb();
+          } catch (err: any) {
+            notify(err.message || 'Failed to delete property', 'error');
+          } finally {
+            setDeletingProperty(null);
+          }
         }}
       />
     </div>
@@ -843,7 +858,7 @@ export const EditPropertyForm: React.FC<{ property: Property; onClose: () => voi
   property,
   onClose,
 }) => {
-  const { db, updateDb } = useCRM();
+  const { db, updateDb, notify, refreshDb } = useCRM();
   const [title, setTitle] = useState(property.title);
   const [type, setType] = useState<PropertyType>(property.type);
   const [category, setCategory] = useState<PropertyCategory>(property.category);
@@ -885,44 +900,80 @@ export const EditPropertyForm: React.FC<{ property: Property; onClose: () => voi
   const [boundaryDetails, setBoundaryDetails] = useState(property.boundaryDetails || '');
   const [otherFeatures, setOtherFeatures] = useState(property.otherFeatures || '');
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const ok = updateDb(
-      (prev) =>
-        crmService.updateProperty(prev, property.id, {
-          title,
-          type,
-          category,
-          district,
-          panchayath,
-          locality,
-          fullAddress,
-          googleMapsUrl,
-          latitude,
-          longitude,
-          location_accuracy: locationAccuracy,
-          areaValue: Number(areaValue) || property.areaValue,
-          roadConnectivity,
-          expectedPrice: Number(expectedPrice) || property.expectedPrice || property.askingPrice,
-          marketPrice: marketPrice ? Number(marketPrice) : undefined,
-          priceNote: priceNote.trim() || undefined,
-          status,
-          assignedAgentId,
-          description,
-          internalNotes,
-          isManaged,
-          distanceToHighway,
-          nearbyLandmarks,
-          waterAvailability,
-          terrain,
-          frontage,
-          electricity,
-          boundaryDetails,
-          otherFeatures,
-        }),
-      'Property details updated (listing ID & date preserved)'
-    );
-    if (ok) onClose();
+    try {
+      await apiClient.updateProperty(property.id, {
+        title,
+        type,
+        category,
+        district,
+        panchayath,
+        locality,
+        full_address: fullAddress,
+        google_maps_url: googleMapsUrl,
+        latitude,
+        longitude,
+        location_accuracy: locationAccuracy,
+        area_value: Number(areaValue) || property.areaValue,
+        road_connectivity: roadConnectivity,
+        expected_price: Number(expectedPrice) || property.expectedPrice || property.askingPrice,
+        market_price: marketPrice ? Number(marketPrice) : undefined,
+        price_note: priceNote.trim() || undefined,
+        status,
+        assigned_agent_id: assignedAgentId,
+        description,
+        internal_notes: internalNotes,
+        is_managed: isManaged,
+        distance_to_highway: distanceToHighway,
+        nearby_landmarks: nearbyLandmarks,
+        water_availability: waterAvailability,
+        terrain,
+        frontage,
+        electricity,
+        boundary_details: boundaryDetails,
+        other_features: otherFeatures,
+      });
+      updateDb(
+        (prev) =>
+          crmService.updateProperty(prev, property.id, {
+            title,
+            type,
+            category,
+            district,
+            panchayath,
+            locality,
+            fullAddress,
+            googleMapsUrl,
+            latitude,
+            longitude,
+            location_accuracy: locationAccuracy,
+            areaValue: Number(areaValue) || property.areaValue,
+            roadConnectivity,
+            expectedPrice: Number(expectedPrice) || property.expectedPrice || property.askingPrice,
+            marketPrice: marketPrice ? Number(marketPrice) : undefined,
+            priceNote: priceNote.trim() || undefined,
+            status,
+            assignedAgentId,
+            description,
+            internalNotes,
+            isManaged,
+            distanceToHighway,
+            nearbyLandmarks,
+            waterAvailability,
+            terrain,
+            frontage,
+            electricity,
+            boundaryDetails,
+            otherFeatures,
+          }),
+        'Property details updated'
+      );
+      await refreshDb();
+      onClose();
+    } catch (err: any) {
+      notify(err.message || 'Failed to update property', 'error');
+    }
   };
 
   return (

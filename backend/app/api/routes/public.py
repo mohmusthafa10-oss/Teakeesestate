@@ -80,6 +80,7 @@ async def create_property_submission(
         )
 
     # 4. Create submission record
+    now_utc = datetime.now(timezone.utc)
     submission = PropertySubmission(
         reference=_generate_reference(),
         seller_name=seller_name.strip(),
@@ -93,30 +94,43 @@ async def create_property_submission(
         bathrooms=bathrooms,
         notes=notes,
         status=SubmissionStatus.PENDING_REVIEW.value,
+        contact_deadline_at=now_utc + timedelta(hours=48),
         created_by_user_id=current_user.id if current_user else None,
     )
     db.add(submission)
     db.flush()
 
-    # 5. Process media files through validation and EXIF stripping
+    # 5. Process media files through validation and EXIF stripping with cleanup on error
     media_service = MediaStorageService()
-    for order, upload in enumerate(files, start=1):
-        saved = media_service.save_file(upload)
-        media = SubmissionMedia(
-            submission_id=submission.id,
-            original_filename=upload.filename or "media",
-            storage_key=saved["storage_key"],
-            mime_type=saved["mime_type"],
-            size=saved["size"],
-            category="video" if "video" in saved["mime_type"] else "photo",
-            order=order,
-        )
-        db.add(media)
+    saved_storage_keys: List[str] = []
+    try:
+        for order, upload in enumerate(files, start=1):
+            saved = media_service.save_file(upload)
+            saved_storage_keys.append(saved["storage_key"])
+            media = SubmissionMedia(
+                submission_id=submission.id,
+                original_filename=upload.filename or "media",
+                storage_key=saved["storage_key"],
+                mime_type=saved["mime_type"],
+                size=saved["size"],
+                category="video" if "video" in saved["mime_type"] else "photo",
+                order=order,
+            )
+            db.add(media)
+        db.commit()
+    except Exception:
+        db.rollback()
+        for key in saved_storage_keys:
+            try:
+                media_service.delete_file(key)
+            except Exception:
+                pass
+        raise
 
-    db.commit()
     return {
         "reference": submission.reference,
         "status": submission.status,
+        "contact_deadline_at": submission.contact_deadline_at.isoformat() if submission.contact_deadline_at else None,
         "message": "Thank you for submitting your property! Our team will contact you within 48 hours.",
     }
 

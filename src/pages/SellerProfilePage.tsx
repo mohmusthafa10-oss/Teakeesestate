@@ -9,6 +9,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
+import { apiClient } from '../services/apiClient';
 import {
   CONTACT_METHODS,
   crmService,
@@ -31,7 +32,7 @@ import {
 } from '../components/common/UIPrimitives';
 
 export const SellerProfilePage: React.FC = () => {
-  const { db, route, navigate, updateDb } = useCRM();
+  const { db, route, navigate, updateDb, notify, refreshDb } = useCRM();
   const currency = db.settings.currencySymbol;
   const seller = db.sellers.find((s) => s.id === route.id);
 
@@ -582,22 +583,35 @@ export const SellerProfilePage: React.FC = () => {
         maxWidthClass="max-w-md"
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
-            updateDb(
-              (prev) =>
-                crmService.upsertSeller(prev, {
-                  id: seller.id,
-                  name: editName,
-                  phone: editPhone,
-                  whatsapp: editWhatsapp || editPhone,
-                  address: editAddress,
-                  relationshipWithProperty: editRel,
-                  notes: editNotes,
-                }),
-              'Seller profile updated'
-            );
-            setEditModalOpen(false);
+            try {
+              await apiClient.updateSeller(seller.id, {
+                name: editName,
+                phone: editPhone,
+                whatsapp: editWhatsapp || editPhone,
+                address: editAddress,
+                relationship_with_property: editRel,
+                notes: editNotes,
+              });
+              updateDb(
+                (prev) =>
+                  crmService.upsertSeller(prev, {
+                    id: seller.id,
+                    name: editName,
+                    phone: editPhone,
+                    whatsapp: editWhatsapp || editPhone,
+                    address: editAddress,
+                    relationshipWithProperty: editRel,
+                    notes: editNotes,
+                  }),
+                'Seller profile updated'
+              );
+              await refreshDb();
+              setEditModalOpen(false);
+            } catch (err: any) {
+              notify(err.message || 'Failed to update seller', 'error');
+            }
           }}
           className="space-y-4"
         >
@@ -690,27 +704,41 @@ export const SellerProfilePage: React.FC = () => {
         maxWidthClass="max-w-md"
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             if (!fupTitle.trim()) return;
-            updateDb(
-              (prev) =>
-                crmService.upsertFollowUp(prev, {
-                  title: fupTitle,
-                  relatedType: 'Seller',
-                  relatedId: seller.id,
-                  propertyId: ownedProperties[0]?.id,
-                  assignedAgentId: seller.assignedAgentId,
-                  date: fupDate,
-                  time: '11:00',
-                  activityType: fupType,
-                  notes: fupNotes,
-                }),
-              'Seller follow-up scheduled'
-            );
-            setFupTitle('');
-            setFupNotes('');
-            setFupModalOpen(false);
+            try {
+              await apiClient.createFollowUp({
+                title: fupTitle,
+                related_type: 'Seller',
+                related_id: seller.id,
+                property_id: ownedProperties[0]?.id,
+                assigned_agent_id: seller.assignedAgentId,
+                date: fupDate,
+                time: '11:00',
+                activity_type: fupType,
+                notes: fupNotes,
+              });
+              updateDb(
+                (prev) =>
+                  crmService.upsertFollowUp(prev, {
+                    title: fupTitle,
+                    relatedType: 'Seller',
+                    relatedId: seller.id,
+                    propertyId: ownedProperties[0]?.id,
+                    assignedAgentId: seller.assignedAgentId,
+                    date: fupDate,
+                    time: '11:00',
+                    activityType: fupType,
+                    notes: fupNotes,
+                  }),
+                'Seller follow-up scheduled'
+              );
+              await refreshDb();
+              setFupModalOpen(false);
+            } catch (err: any) {
+              notify(err.message || 'Failed to schedule follow-up', 'error');
+            }
           }}
           className="space-y-4"
         >

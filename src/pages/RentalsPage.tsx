@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Pencil, Plus, Receipt, Trash2, UserPlus } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { crmService } from '../services/crmService';
+import { apiClient } from '../services/apiClient';
 import { RentalBooking, RentalStatus, RentalType } from '../types/crm';
 import {
   formatCurrency,
@@ -17,7 +18,7 @@ import {
 } from '../components/common/UIPrimitives';
 
 export const RentalsPage: React.FC = () => {
-  const { db, navigate, updateDb } = useCRM();
+  const { db, navigate, updateDb, notify, refreshDb } = useCRM();
   const currency = db.settings.currencySymbol;
   const today = getTodayISO();
   const nextWeek = offsetDaysISO(7);
@@ -316,16 +317,23 @@ export const RentalsPage: React.FC = () => {
                       <td className="py-3 px-3">
                         <select
                           value={b.status}
-                          onChange={(e) =>
-                            updateDb(
-                              (prev) =>
-                                crmService.upsertRentalBooking(prev, {
-                                  ...b,
-                                  status: e.target.value as RentalStatus,
-                                }),
-                              `Rental status changed to ${e.target.value}`
-                            )
-                          }
+                          onChange={async (e) => {
+                            const newStatus = e.target.value as RentalStatus;
+                            try {
+                              await apiClient.updateRental(b.id, { status: newStatus });
+                              updateDb(
+                                (prev) =>
+                                  crmService.upsertRentalBooking(prev, {
+                                    ...b,
+                                    status: newStatus,
+                                  }),
+                                `Rental status changed to ${newStatus}`
+                              );
+                              await refreshDb();
+                            } catch (err: any) {
+                              notify(err.message || 'Failed to update rental status', 'error');
+                            }
+                          }}
                           className="h-7 px-2 text-[11px] border border-[#E5E4DA] rounded bg-[#FFFFFF]"
                         >
                           <option value="Available">Available</option>
@@ -384,29 +392,53 @@ export const RentalsPage: React.FC = () => {
         title={editing ? `Edit Rental — ${editing.code}` : 'Add Stay / Rental Record'}
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             if (!propertyId || !rateAmount) return;
-            updateDb(
-              (prev) =>
-                crmService.upsertRentalBooking(prev, {
-                  id: editing?.id,
-                  propertyId,
-                  tenantId: tenantId || undefined,
-                  rentalType,
-                  rateAmount: Number(rateAmount),
-                  bookingDate,
-                  checkIn,
-                  checkOut,
-                  deposit: Number(deposit) || 0,
-                  contractRef,
-                  incomeReceived: Number(incomeReceived) || 0,
-                  status,
-                  maintenanceNotes,
-                }),
-              editing ? 'Rental updated' : 'Rental booking created'
-            );
-            setBookingModalOpen(false);
+            try {
+              const payload = {
+                property_id: propertyId,
+                tenant_id: tenantId || undefined,
+                rental_type: rentalType,
+                rate_amount: Number(rateAmount),
+                booking_date: bookingDate,
+                check_in: checkIn,
+                check_out: checkOut,
+                deposit: Number(deposit) || 0,
+                contract_ref: contractRef,
+                income_received: Number(incomeReceived) || 0,
+                status,
+                maintenance_notes: maintenanceNotes,
+              };
+              if (editing) {
+                await apiClient.updateRental(editing.id, payload);
+              } else {
+                await apiClient.createRental(payload);
+              }
+              updateDb(
+                (prev) =>
+                  crmService.upsertRentalBooking(prev, {
+                    id: editing?.id,
+                    propertyId,
+                    tenantId: tenantId || undefined,
+                    rentalType,
+                    rateAmount: Number(rateAmount),
+                    bookingDate,
+                    checkIn,
+                    checkOut,
+                    deposit: Number(deposit) || 0,
+                    contractRef,
+                    incomeReceived: Number(incomeReceived) || 0,
+                    status,
+                    maintenanceNotes,
+                  }),
+                editing ? 'Rental updated' : 'Rental booking created'
+              );
+              await refreshDb();
+              setBookingModalOpen(false);
+            } catch (err: any) {
+              notify(err.message || 'Failed to save rental booking', 'error');
+            }
           }}
           className="space-y-4"
         >
@@ -734,13 +766,20 @@ export const RentalsPage: React.FC = () => {
         message={`Delete booking ${deleting?.code}?`}
         confirmLabel="Delete"
         onCancel={() => setDeleting(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!deleting) return;
-          updateDb(
-            (prev) => crmService.deleteRentalBooking(prev, deleting.id),
-            'Rental booking deleted'
-          );
-          setDeleting(null);
+          try {
+            await apiClient.deleteRental(deleting.id);
+            updateDb(
+              (prev) => crmService.deleteRentalBooking(prev, deleting.id),
+              'Rental booking deleted'
+            );
+            await refreshDb();
+          } catch (err: any) {
+            notify(err.message || 'Failed to delete rental booking', 'error');
+          } finally {
+            setDeleting(null);
+          }
         }}
       />
     </div>

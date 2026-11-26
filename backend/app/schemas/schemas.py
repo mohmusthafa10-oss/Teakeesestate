@@ -108,6 +108,8 @@ class PropertyImageCreate(BaseModel):
     url: str
     caption: Optional[str] = ""
     is_primary: bool = False
+    media_type: str = "photo"
+    mime_type: Optional[str] = None
 
 class PropertyImageResponse(BaseModel):
     id: str
@@ -115,6 +117,8 @@ class PropertyImageResponse(BaseModel):
     url: str
     caption: Optional[str] = ""
     is_primary: bool
+    media_type: str = "photo"
+    mime_type: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -168,6 +172,8 @@ class PropertyBase(BaseModel):
     google_maps_url: Optional[str] = None
     area_value: Decimal
     area_unit: str = "Cents"
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[int] = None
     road_connectivity: Optional[str] = "Tar Road Access"
     distance_to_highway: Optional[str] = None
     nearby_landmarks: Optional[str] = None
@@ -209,6 +215,8 @@ class PropertyUpdate(BaseModel):
     google_maps_url: Optional[str] = None
     area_value: Optional[Decimal] = None
     area_unit: Optional[str] = None
+    bedrooms: Optional[int] = None
+    bathrooms: Optional[int] = None
     road_connectivity: Optional[str] = None
     distance_to_highway: Optional[str] = None
     nearby_landmarks: Optional[str] = None

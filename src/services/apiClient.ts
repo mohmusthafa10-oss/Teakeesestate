@@ -14,9 +14,11 @@ import {
   User,
 } from '../types/crm';
 
-const rawBase = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL;
+const rawBase = import.meta.env.VITE_API_BASE_URL !== undefined
+  ? import.meta.env.VITE_API_BASE_URL
+  : import.meta.env.VITE_API_URL;
 const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const API_BASE = (rawBase || (isLocal ? 'http://localhost:8000' : 'https://teakeesestate.onrender.com')).replace(/\/+$/, '');
+const API_BASE = (rawBase !== undefined ? rawBase : (isLocal ? 'http://localhost:8000' : '')).replace(/\/+$/, '');
 const TOKEN_KEY = 'crm_access_token';
 const REFRESH_KEY = 'crm_refresh_token';
 
@@ -158,17 +160,23 @@ class ApiClient {
     return this.request<Property[]>(`/api/sellers/${id}/properties`);
   }
 
-  async createSeller(data: Partial<Seller>): Promise<Seller> {
+  async createSeller(data: any): Promise<Seller> {
     return this.request<Seller>('/api/sellers', {
       method: 'POST',
       body: JSON.stringify(data),
     });
   }
 
-  async updateSeller(id: string, data: Partial<Seller>): Promise<Seller> {
+  async updateSeller(id: string, data: any): Promise<Seller> {
     return this.request<Seller>(`/api/sellers/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  }
+
+  async deleteSeller(id: string): Promise<any> {
+    return this.request(`/api/sellers/${id}`, {
+      method: 'DELETE',
     });
   }
 
@@ -206,6 +214,25 @@ class ApiClient {
     return this.request<Property>(`/api/properties/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  }
+
+  async deleteProperty(id: string): Promise<any> {
+    return this.request(`/api/properties/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async addPropertyMedia(id: string, data: { url: string; caption?: string; is_primary?: boolean; media_type?: string; mime_type?: string }): Promise<any> {
+    return this.request(`/api/properties/${id}/media`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deletePropertyMedia(propertyId: string, mediaId: string): Promise<any> {
+    return this.request(`/api/properties/${propertyId}/media/${mediaId}`, {
+      method: 'DELETE',
     });
   }
 
@@ -249,6 +276,12 @@ class ApiClient {
     return this.request<Lead>(`/api/leads/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  }
+
+  async deleteLead(id: string): Promise<any> {
+    return this.request(`/api/leads/${id}`, {
+      method: 'DELETE',
     });
   }
 
@@ -298,6 +331,12 @@ class ApiClient {
     return this.request<FollowUp>(`/api/followups/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  }
+
+  async deleteFollowUp(id: string): Promise<any> {
+    return this.request(`/api/followups/${id}`, {
+      method: 'DELETE',
     });
   }
 
@@ -353,6 +392,12 @@ class ApiClient {
     });
   }
 
+  async deleteDeal(id: string): Promise<any> {
+    return this.request(`/api/deals/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // ==================== ADVANCES & INVESTMENTS ====================
   async getAdvances(params: { seller_id?: string; property_id?: string } = {}): Promise<SellerAdvance[]> {
     const query = new URLSearchParams();
@@ -403,6 +448,12 @@ class ApiClient {
     return this.request<RentalBooking>(`/api/rentals/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
+    });
+  }
+
+  async deleteRental(id: string): Promise<any> {
+    return this.request(`/api/rentals/${id}`, {
+      method: 'DELETE',
     });
   }
 

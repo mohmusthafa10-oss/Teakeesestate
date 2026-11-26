@@ -83,7 +83,3 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_property_submissions_reference'), table_name='property_submissions')
     op.drop_index(op.f('ix_property_submissions_status'), table_name='property_submissions')
     op.drop_table("property_submissions")
-
-
-def downgrade() -> None:
-    pass

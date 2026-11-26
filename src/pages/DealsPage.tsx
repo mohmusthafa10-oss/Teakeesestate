@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { crmService } from '../services/crmService';
+import { apiClient } from '../services/apiClient';
 import { Deal, DealStatus } from '../types/crm';
 import { formatCurrency, formatDate, getTodayISO } from '../utils/formatters';
 import {
@@ -22,7 +23,7 @@ const DEAL_STAGES: DealStatus[] = [
 ];
 
 export const DealsPage: React.FC = () => {
-  const { db, currentUser, navigate, updateDb, visibleDeals } = useCRM();
+  const { db, currentUser, navigate, updateDb, visibleDeals, notify, refreshDb } = useCRM();
   const currency = db.settings.currencySymbol;
 
   const [stageFilter, setStageFilter] = useState<string>('All');
@@ -105,30 +106,51 @@ export const DealsPage: React.FC = () => {
     ? db.sellers.find((s) => s.id === selectedProperty.sellerId)
     : undefined;
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!leadId || !propertyId || !agreedPrice) return;
-    const ok = updateDb(
-      (prev) =>
-        crmService.upsertDeal(prev, {
-          id: editingDeal?.id,
-          dealType,
-          leadId,
-          propertyId,
-          assignedAgentId,
-          agreedPrice: Number(agreedPrice),
-          commissionRate: Number(commissionRate) || 0,
-          dealDate,
-          status,
-          notes,
-        }),
-      status === 'Closed'
-        ? 'Deal closed and property status updated automatically'
-        : editingDeal
-        ? 'Deal updated'
-        : 'Deal created'
-    );
-    if (ok) setModalOpen(false);
+    try {
+      const payload = {
+        deal_type: dealType,
+        lead_id: leadId,
+        property_id: propertyId,
+        assigned_agent_id: assignedAgentId,
+        final_price: Number(agreedPrice),
+        commission_rate: Number(commissionRate) || 0,
+        deal_date: dealDate,
+        status,
+        notes,
+      };
+      if (editingDeal) {
+        await apiClient.updateDeal(editingDeal.id, payload);
+      } else {
+        await apiClient.createDeal(payload);
+      }
+      updateDb(
+        (prev) =>
+          crmService.upsertDeal(prev, {
+            id: editingDeal?.id,
+            dealType,
+            leadId,
+            propertyId,
+            assignedAgentId,
+            agreedPrice: Number(agreedPrice),
+            commissionRate: Number(commissionRate) || 0,
+            dealDate,
+            status,
+            notes,
+          }),
+        status === 'Closed'
+          ? 'Deal closed and property status updated automatically'
+          : editingDeal
+          ? 'Deal updated'
+          : 'Deal created'
+      );
+      await refreshDb();
+      setModalOpen(false);
+    } catch (err: any) {
+      notify(err.message || 'Failed to save deal', 'error');
+    }
   };
 
   return (
@@ -292,16 +314,23 @@ export const DealsPage: React.FC = () => {
                       <td className="py-3 px-3">
                         <select
                           value={deal.status}
-                          onChange={(e) =>
-                            updateDb(
-                              (prev) =>
-                                crmService.upsertDeal(prev, {
-                                  ...deal,
-                                  status: e.target.value as DealStatus,
-                                }),
-                              `Deal ${deal.code} marked ${e.target.value}`
-                            )
-                          }
+                          onChange={async (e) => {
+                            const newStatus = e.target.value as DealStatus;
+                            try {
+                              await apiClient.updateDeal(deal.id, { status: newStatus });
+                              updateDb(
+                                (prev) =>
+                                  crmService.upsertDeal(prev, {
+                                    ...deal,
+                                    status: newStatus,
+                                  }),
+                                `Deal ${deal.code} marked ${newStatus}`
+                              );
+                              await refreshDb();
+                            } catch (err: any) {
+                              notify(err.message || 'Failed to update deal status', 'error');
+                            }
+                          }}
                           className="h-7 px-2 text-[11px] border border-[#E5E4DA] rounded bg-[#FFFFFF]"
                         >
                           {DEAL_STAGES.map((st) => (
@@ -502,13 +531,20 @@ export const DealsPage: React.FC = () => {
         message={`Delete deal ${deletingDeal?.code}?`}
         confirmLabel="Delete"
         onCancel={() => setDeletingDeal(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (!deletingDeal) return;
-          updateDb(
-            (prev) => crmService.deleteDeal(prev, deletingDeal.id),
-            'Deal removed'
-          );
-          setDeletingDeal(null);
+          try {
+            await apiClient.deleteDeal(deletingDeal.id);
+            updateDb(
+              (prev) => crmService.deleteDeal(prev, deletingDeal.id),
+              'Deal removed'
+            );
+            await refreshDb();
+          } catch (err: any) {
+            notify(err.message || 'Failed to delete deal', 'error');
+          } finally {
+            setDeletingDeal(null);
+          }
         }}
       />
     </div>

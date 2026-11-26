@@ -13,5 +13,12 @@ __pycache__/
 *$py.class
 *.db
 *.sqlite3
+*.db-shm
+*.db-wal
+*.dump
+data/
+backend/data/
+backups/
+backend/backups/
 .pytest_cache/
 uploads/

@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Image as ImageIcon, Lock, Plus, RotateCcw, ShieldCheck, Trash2, Upload, UserPlus } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
 import { crmService, DEFAULT_LOGO_URL } from '../services/crmService';
+import { apiClient } from '../services/apiClient';
 import { PropertyType, UserRole } from '../types/crm';
 import { ConfirmDialog, Modal } from '../components/common/UIPrimitives';
 
 export const SettingsPage: React.FC = () => {
-  const { db, currentUser, isAdmin, updateDb, resetDemo, notify } = useCRM();
+  const { db, currentUser, isAdmin, updateDb, resetDemo, notify, refreshDb } = useCRM();
 
   const [agencyName, setAgencyName] = useState(db.settings.agencyName);
   const [agencyTagline, setAgencyTagline] = useState(db.settings.agencyTagline);
@@ -30,6 +31,7 @@ export const SettingsPage: React.FC = () => {
   const [uPhone, setUPhone] = useState('');
   const [uRole, setURole] = useState<UserRole>('Agent');
   const [uDesignation, setUDesignation] = useState('Property Advisor');
+  const [uPassword, setUPassword] = useState('password123');
 
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
 
@@ -109,28 +111,41 @@ export const SettingsPage: React.FC = () => {
     e.target.value = '';
   };
 
-  const handleSaveCompany = (e: React.FormEvent) => {
+  const handleSaveCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) {
       notify('Only Admin users can modify company settings.', 'error');
       return;
     }
-    updateDb(
-      (prev) =>
-        crmService.updateSettings(prev, {
-          agencyName: agencyName.trim() || 'Real Estate CRM',
-          agencyTagline: agencyTagline.trim(),
-          logoUrl,
-          currencySymbol: currencySymbol.trim() || '₹',
-          defaultCommissionRate: Number(defaultCommission) || 2,
-          followUpDefaults: {
-            ...prev.settings.followUpDefaults,
-            defaultTime,
-            reminderWindowHours: Number(reminderWindow) || 24,
-          },
-        }),
-      'Agency & follow-up settings saved'
-    );
+    const payload = {
+      agencyName: agencyName.trim() || 'Real Estate CRM',
+      agencyTagline: agencyTagline.trim(),
+      logoUrl,
+      currencySymbol: currencySymbol.trim() || '₹',
+      defaultCommissionRate: Number(defaultCommission) || 2,
+      followUpDefaults: {
+        ...db.settings.followUpDefaults,
+        defaultTime,
+        reminderWindowHours: Number(reminderWindow) || 24,
+      },
+      propertyCategories: db.settings.propertyCategories,
+      propertyCategoryGroups: db.settings.propertyCategoryGroups,
+      leadSources: db.settings.leadSources,
+      leadStatuses: db.settings.leadStatuses,
+    };
+
+    try {
+      await apiClient.updateSettings(payload);
+      updateDb(
+        (prev) => crmService.updateSettings(prev, payload),
+        'Agency & follow-up settings saved successfully'
+      );
+      await refreshDb();
+    } catch (err: any) {
+      const errMsg = err?.message || 'Failed to update settings on server';
+      notify(`Settings update failed: ${errMsg}`, 'error');
+      await refreshDb();
+    }
   };
 
   return (
@@ -644,24 +659,31 @@ export const SettingsPage: React.FC = () => {
         maxWidthClass="max-w-md"
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             if (!uName.trim() || !uEmail.trim()) return;
-            updateDb(
-              (prev) =>
-                crmService.upsertUser(prev, {
-                  name: uName,
-                  email: uEmail,
-                  phone: uPhone,
-                  role: uRole,
-                  designation: uDesignation,
-                }),
-              'Team member added'
-            );
-            setUName('');
-            setUEmail('');
-            setUPhone('');
-            setUserModalOpen(false);
+            const userData = {
+              name: uName.trim(),
+              email: uEmail.trim(),
+              phone: uPhone.trim() || undefined,
+              role: uRole,
+              designation: uDesignation.trim() || undefined,
+              password: uPassword || 'password123',
+            };
+            try {
+              await apiClient.createUser(userData);
+              await refreshDb();
+              notify(`User ${uName.trim()} created successfully`, 'success');
+              setUName('');
+              setUEmail('');
+              setUPhone('');
+              setUPassword('password123');
+              setUserModalOpen(false);
+            } catch (err: any) {
+              const errMsg = err?.message || 'Failed to create user on server';
+              notify(`User creation failed: ${errMsg}`, 'error');
+              await refreshDb();
+            }
           }}
           className="space-y-4"
         >
@@ -694,6 +716,16 @@ export const SettingsPage: React.FC = () => {
               className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg"
             />
           </div>
+          <div>
+            <label className="block text-xs font-medium mb-1">Password</label>
+            <input
+              type="password"
+              placeholder="Min 6 characters"
+              value={uPassword}
+              onChange={(e) => setUPassword(e.target.value)}
+              className="w-full h-9 px-3 text-xs border border-[#E5E4DA] rounded-lg"
+            />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium mb-1">Role</label>
@@ -704,6 +736,7 @@ export const SettingsPage: React.FC = () => {
               >
                 <option value="Agent">Agent</option>
                 <option value="Admin">Admin</option>
+                <option value="Telecaller">Telecaller</option>
               </select>
             </div>
             <div>

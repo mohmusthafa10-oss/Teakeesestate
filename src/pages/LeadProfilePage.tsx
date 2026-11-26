@@ -9,6 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useCRM } from '../context/CRMContext';
+import { apiClient } from '../services/apiClient';
 import { CONTACT_METHODS, crmService } from '../services/crmService';
 import { ContactMethod, LeadStatus } from '../types/crm';
 import { findMatchingPropertiesForLead } from '../utils/matching';
@@ -37,7 +38,7 @@ const MAIN_PIPELINE: LeadStatus[] = [
 ];
 
 export const LeadProfilePage: React.FC = () => {
-  const { db, route, navigate, updateDb } = useCRM();
+  const { db, route, navigate, updateDb, notify, refreshDb } = useCRM();
   const currency = db.settings.currencySymbol;
   const lead = db.leads.find((l) => l.id === route.id);
 
@@ -159,18 +160,25 @@ export const LeadProfilePage: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={lead.status}
-              onChange={(e) =>
-                updateDb(
-                  (prev) =>
-                    crmService.upsertLead(prev, {
-                      id: lead.id,
-                      name: lead.name,
-                      phone: lead.phone,
-                      status: e.target.value as LeadStatus,
-                    }),
-                  `Lead moved to ${e.target.value}`
-                )
-              }
+              onChange={async (e) => {
+                const newStatus = e.target.value as LeadStatus;
+                try {
+                  await apiClient.updateLead(lead.id, { status: newStatus });
+                  updateDb(
+                    (prev) =>
+                      crmService.upsertLead(prev, {
+                        id: lead.id,
+                        name: lead.name,
+                        phone: lead.phone,
+                        status: newStatus,
+                      }),
+                    `Lead moved to ${newStatus}`
+                  );
+                  await refreshDb();
+                } catch (err: any) {
+                  notify(err.message || 'Failed to update lead status', 'error');
+                }
+              }}
               className="h-9 px-3 text-xs font-medium bg-[#FFFFFF] border border-[#E5E4DA] rounded-lg cursor-pointer"
             >
               {db.settings.leadStatuses.map((s) => (
@@ -218,18 +226,24 @@ export const LeadProfilePage: React.FC = () => {
               <button
                 key={stage}
                 type="button"
-                onClick={() =>
-                  updateDb(
-                    (prev) =>
-                      crmService.upsertLead(prev, {
-                        id: lead.id,
-                        name: lead.name,
-                        phone: lead.phone,
-                        status: stage,
-                      }),
-                    `Pipeline stage set to ${stage}`
-                  )
-                }
+                onClick={async () => {
+                  try {
+                    await apiClient.updateLead(lead.id, { status: stage });
+                    updateDb(
+                      (prev) =>
+                        crmService.upsertLead(prev, {
+                          id: lead.id,
+                          name: lead.name,
+                          phone: lead.phone,
+                          status: stage,
+                        }),
+                      `Pipeline stage set to ${stage}`
+                    );
+                    await refreshDb();
+                  } catch (err: any) {
+                    notify(err.message || 'Failed to update stage', 'error');
+                  }
+                }}
                 className={`flex-1 py-2 px-3 rounded-lg text-xs font-medium text-center border transition-colors cursor-pointer whitespace-nowrap ${
                   active
                     ? 'bg-[#064E3B] text-[#FFFFFF] border-[#064E3B]'
@@ -756,23 +770,37 @@ export const LeadProfilePage: React.FC = () => {
         maxWidthClass="max-w-md"
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             if (!visitPropId) return;
-            updateDb(
-              (prev) =>
-                crmService.addSiteVisit(prev, {
-                  propertyId: visitPropId,
-                  leadId: lead.id,
-                  agentId: lead.assignedAgentId,
-                  scheduledDate: visitDate,
-                  scheduledTime: visitTime,
-                  status: 'Scheduled',
-                  feedback: '',
-                }),
-              'Site visit scheduled'
-            );
-            setVisitModalOpen(false);
+            try {
+              await apiClient.createSiteVisit({
+                property_id: visitPropId,
+                lead_id: lead.id,
+                agent_id: lead.assignedAgentId,
+                scheduled_date: visitDate,
+                scheduled_time: visitTime,
+                status: 'Scheduled',
+                feedback: '',
+              });
+              updateDb(
+                (prev) =>
+                  crmService.addSiteVisit(prev, {
+                    propertyId: visitPropId,
+                    leadId: lead.id,
+                    agentId: lead.assignedAgentId,
+                    scheduledDate: visitDate,
+                    scheduledTime: visitTime,
+                    status: 'Scheduled',
+                    feedback: '',
+                  }),
+                'Site visit scheduled'
+              );
+              await refreshDb();
+              setVisitModalOpen(false);
+            } catch (err: any) {
+              notify(err.message || 'Failed to schedule site visit', 'error');
+            }
           }}
           className="space-y-4"
         >
@@ -842,27 +870,43 @@ export const LeadProfilePage: React.FC = () => {
         maxWidthClass="max-w-md"
       >
         <form
-          onSubmit={(e) => {
+          onSubmit={async (e) => {
             e.preventDefault();
             if (!fupTitle.trim()) return;
-            updateDb(
-              (prev) =>
-                crmService.upsertFollowUp(prev, {
-                  title: fupTitle,
-                  relatedType: 'Lead',
-                  relatedId: lead.id,
-                  propertyId: matches[0]?.propertyId,
-                  assignedAgentId: lead.assignedAgentId,
-                  date: fupDate,
-                  time: '10:30',
-                  activityType: fupType,
-                  notes: fupNotes,
-                }),
-              'Follow-up scheduled'
-            );
-            setFupTitle('');
-            setFupNotes('');
-            setFupModalOpen(false);
+            try {
+              await apiClient.createFollowUp({
+                title: fupTitle,
+                related_type: 'Lead',
+                related_id: lead.id,
+                property_id: matches[0]?.propertyId,
+                assigned_agent_id: lead.assignedAgentId,
+                date: fupDate,
+                time: '10:30',
+                activity_type: fupType,
+                notes: fupNotes,
+              });
+              updateDb(
+                (prev) =>
+                  crmService.upsertFollowUp(prev, {
+                    title: fupTitle,
+                    relatedType: 'Lead',
+                    relatedId: lead.id,
+                    propertyId: matches[0]?.propertyId,
+                    assignedAgentId: lead.assignedAgentId,
+                    date: fupDate,
+                    time: '10:30',
+                    activityType: fupType,
+                    notes: fupNotes,
+                  }),
+                'Follow-up scheduled'
+              );
+              await refreshDb();
+              setFupTitle('');
+              setFupNotes('');
+              setFupModalOpen(false);
+            } catch (err: any) {
+              notify(err.message || 'Failed to schedule follow-up', 'error');
+            }
           }}
           className="space-y-4"
         >

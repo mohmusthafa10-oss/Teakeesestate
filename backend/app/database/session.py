@@ -46,12 +46,28 @@ database_url = sanitize_db_url(settings.DATABASE_URL)
 def _make_engine():
     """Create the SQLAlchemy engine based on the DATABASE_URL scheme."""
     if database_url.startswith("sqlite"):
+        if settings.is_production:
+            raise RuntimeError(
+                "FATAL CONFIGURATION ERROR: Attempting to run in production mode with a SQLite database. "
+                "PostgreSQL is required in production. Set DATABASE_URL to a valid PostgreSQL connection URI in /etc/teakees/backend.env."
+            )
         logger.info("Using SQLite database (development mode)")
-        return create_engine(
+        eng = create_engine(
             database_url,
-            connect_args={"check_same_thread": False},
+            connect_args={"check_same_thread": False, "timeout": 30},
             echo=False,
         )
+        @event.listens_for(eng, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+            except Exception:
+                pass
+            finally:
+                cursor.close()
+        return eng
 
     # PostgreSQL / psycopg2 — production settings
     pool_size = int(getattr(settings, "DB_POOL_SIZE", 10))

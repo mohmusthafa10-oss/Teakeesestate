@@ -120,17 +120,22 @@ def check_record_access(
         return
 
     if user.role == "Telecaller":
+        # Telecallers have full access to manage sellers and properties in CRM
+        model_name = getattr(record, "__tablename__", "")
+        if model_name in ("sellers", "properties"):
+            return
+
         created_id = (
             getattr(record, "created_by_user_id", None)
             or (getattr(record, creator_field, None) if creator_field else None)
             or getattr(record, "created_by", None)
         )
-        if created_id != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied: Telecallers can only access records they submitted",
-            )
-        return
+        if created_id == user.id:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Telecallers can only access records they submitted or are authorized to manage",
+        )
 
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,

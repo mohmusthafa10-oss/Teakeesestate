@@ -94,12 +94,16 @@ async def lifespan(app: FastAPI):
                 except Exception as e:
                     db.rollback()
                     logger.error("Failed to bootstrap initial admin account: %s", e)
+                    if settings.is_production:
+                        raise
             else:
                 if settings.is_production:
                     logger.warning("No Admin user found in database and FIRST_ADMIN_EMAIL/PASSWORD not set. Run `python -m app.bootstrap_admin` to create an admin.")
     except Exception as e:
         db.rollback()
         logger.error("Database error during startup bootstrap: %s", e)
+        if settings.is_production:
+            raise
     finally:
         db.close()
 
@@ -112,11 +116,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS Middleware - Permissive configuration for hosted & local environments
+# CORS Middleware - Enforce configured origins
+cors_origins = [str(o) for o in settings.CORS_ORIGINS] if settings.CORS_ORIGINS else ["*"]
+allow_all = "*" in cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=cors_origins,
+    allow_credentials=not allow_all,
     allow_methods=["*"],
     allow_headers=["*"],
 )

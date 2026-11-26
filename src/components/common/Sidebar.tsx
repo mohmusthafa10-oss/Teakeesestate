@@ -56,98 +56,127 @@ export const Sidebar: React.FC<{
     (d) => !['Closed', 'Cancelled', 'Lost'].includes(d.status)
   ).length;
 
-  const navGroups: NavGroup[] = [
-    {
-      label: 'Overview',
-      items: [
-        {
-          label: 'Dashboard',
-          page: 'dashboard',
-          icon: LayoutDashboard,
-        },
-      ],
-    },
-    {
-      label: 'Inventory & Clients',
-      items: [
-        {
-          label: 'Properties',
-          page: 'properties',
-          icon: Building2,
-          activeMatches: ['properties', 'property-detail', 'register-property'],
-          count: visibleProperties.length,
-        },
-        {
-          label: 'Leads',
-          page: 'leads',
-          icon: Users,
-          activeMatches: ['leads', 'lead-detail'],
-          count: visibleLeads.length,
-        },
-        {
-          label: 'Sellers',
-          page: 'sellers',
-          icon: UserCheck,
-          activeMatches: ['sellers', 'seller-detail'],
-          count: visibleSellers.length,
-        },
-        {
-          label: 'Submissions',
-          page: 'admin-submissions',
-          icon: ClipboardList,
-          activeMatches: ['admin-submissions'],
-        },
-        {
-          label: 'Running Properties',
-          page: 'running-properties',
-          icon: Activity,
-          count: runningCount,
-        },
-      ],
-    },
-    {
-      label: 'Operations',
-      items: [
-        {
-          label: 'Follow-ups',
-          page: 'follow-ups',
-          icon: CalendarCheck2,
-          count: pendingTodayOrOverdue,
-        },
-        {
-          label: 'Deals & Sales',
-          page: 'deals',
-          icon: Handshake,
-          count: activeDealsCount,
-        },
-        {
-          label: 'Investments & ROI',
-          page: 'investments',
-          icon: TrendingUp,
-        },
-        {
-          label: 'Stay & Rentals',
-          page: 'rentals',
-          icon: Home,
-        },
-      ],
-    },
-    {
-      label: 'Analytics & System',
-      items: [
-        {
-          label: 'Reports',
-          page: 'reports',
-          icon: BarChart3,
-        },
-        {
-          label: 'Settings',
-          page: 'settings',
-          icon: Settings,
-        },
-      ],
-    },
-  ];
+  const navGroups: NavGroup[] = React.useMemo(() => {
+    const isUserAdmin = currentUser.role === 'Admin';
+    const isUserTelecaller = currentUser.role === 'Telecaller';
+
+    const groups: NavGroup[] = [
+      {
+        label: 'Overview',
+        items: [
+          {
+            label: 'Dashboard',
+            page: 'dashboard',
+            icon: LayoutDashboard,
+          },
+        ],
+      },
+      {
+        label: 'Inventory & Clients',
+        items: [
+          {
+            label: 'Properties',
+            page: 'properties',
+            icon: Building2,
+            activeMatches: ['properties', 'property-detail', 'register-property'],
+            count: visibleProperties.length,
+          },
+          ...(!isUserTelecaller
+            ? [
+                {
+                  label: 'Leads',
+                  page: 'leads' as RoutePage,
+                  icon: Users,
+                  activeMatches: ['leads' as RoutePage, 'lead-detail' as RoutePage],
+                  count: visibleLeads.length,
+                },
+              ]
+            : []),
+          {
+            label: 'Sellers',
+            page: 'sellers',
+            icon: UserCheck,
+            activeMatches: ['sellers', 'seller-detail'],
+            count: visibleSellers.length,
+          },
+          ...(isUserAdmin
+            ? [
+                {
+                  label: 'Submissions',
+                  page: 'admin-submissions' as RoutePage,
+                  icon: ClipboardList,
+                  activeMatches: ['admin-submissions' as RoutePage],
+                },
+              ]
+            : []),
+          {
+            label: 'Running Properties',
+            page: 'running-properties',
+            icon: Activity,
+            count: runningCount,
+          },
+        ],
+      },
+    ];
+
+    if (!isUserTelecaller) {
+      groups.push({
+        label: 'Operations',
+        items: [
+          {
+            label: 'Follow-ups',
+            page: 'follow-ups',
+            icon: CalendarCheck2,
+            count: pendingTodayOrOverdue,
+          },
+          {
+            label: 'Deals & Sales',
+            page: 'deals',
+            icon: Handshake,
+            count: activeDealsCount,
+          },
+          {
+            label: 'Investments & ROI',
+            page: 'investments',
+            icon: TrendingUp,
+          },
+          {
+            label: 'Stay & Rentals',
+            page: 'rentals',
+            icon: Home,
+          },
+        ],
+      });
+    }
+
+    if (isUserAdmin) {
+      groups.push({
+        label: 'Analytics & System',
+        items: [
+          {
+            label: 'Reports',
+            page: 'reports',
+            icon: BarChart3,
+          },
+          {
+            label: 'Settings',
+            page: 'settings',
+            icon: Settings,
+          },
+        ],
+      });
+    }
+
+    return groups;
+  }, [
+    currentUser.role,
+    visibleProperties.length,
+    visibleLeads.length,
+    visibleSellers.length,
+    runningCount,
+    pendingTodayOrOverdue,
+    activeDealsCount,
+  ]);
 
   const isNavActive = (item: NavGroup['items'][number]) => {
     if (item.activeMatches) return item.activeMatches.includes(route.page);

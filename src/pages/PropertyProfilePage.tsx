@@ -48,7 +48,7 @@ import { EditPropertyForm } from './PropertiesPage';
 import { getPropertyCoords } from '../utils/geo';
 
 export const PropertyProfilePage: React.FC = () => {
-  const { db, route, navigate, updateDb, notify, currentUser } = useCRM();
+  const { db, route, navigate, updateDb, notify, currentUser, refreshDb } = useCRM();
   const currency = db.settings.currencySymbol;
 
   const property = db.properties.find((p) => p.id === route.id);
@@ -207,20 +207,33 @@ export const PropertyProfilePage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
+    reader.onload = async () => {
       if (typeof reader.result === 'string') {
-        updateDb(
-          (prev) =>
-            crmService.addPropertyImage(
-              prev,
-              property.id,
-              reader.result as string,
-              file.name.replace(/\.[^.]+$/, ''),
-              images.length === 0
-            ),
-          'Property photo uploaded'
-        );
-        setPhotoModalOpen(false);
+        try {
+          const mediaType = file.type.startsWith('video/') ? 'video' : 'photo';
+          await apiClient.addPropertyMedia(property.id, {
+            url: reader.result as string,
+            caption: file.name.replace(/\.[^.]+$/, ''),
+            is_primary: images.length === 0,
+            media_type: mediaType,
+            mime_type: file.type,
+          });
+          updateDb(
+            (prev) =>
+              crmService.addPropertyImage(
+                prev,
+                property.id,
+                reader.result as string,
+                file.name.replace(/\.[^.]+$/, ''),
+                images.length === 0
+              ),
+            'Property photo uploaded'
+          );
+          await refreshDb();
+          setPhotoModalOpen(false);
+        } catch (err: any) {
+          notify(err.message || 'Failed to upload media', 'error');
+        }
       }
     };
     reader.readAsDataURL(file);
@@ -315,15 +328,22 @@ export const PropertyProfilePage: React.FC = () => {
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={property.status}
-              onChange={(e) =>
-                updateDb(
-                  (prev) =>
-                    crmService.updateProperty(prev, property.id, {
-                      status: e.target.value as PropertyStatus,
-                    }),
-                  `Status updated to ${e.target.value}`
-                )
-              }
+              onChange={async (e) => {
+                const newStatus = e.target.value as PropertyStatus;
+                try {
+                  await apiClient.updateProperty(property.id, { status: newStatus });
+                  updateDb(
+                    (prev) =>
+                      crmService.updateProperty(prev, property.id, {
+                        status: newStatus,
+                      }),
+                    `Status updated to ${newStatus}`
+                  );
+                  await refreshDb();
+                } catch (err: any) {
+                  notify(err.message || 'Failed to update status', 'error');
+                }
+              }}
               className="h-9 px-3 text-xs font-medium bg-[#FFFFFF] border border-[#E5E4DA] rounded-lg cursor-pointer"
             >
               <option value="Available">Available</option>
@@ -387,12 +407,20 @@ export const PropertyProfilePage: React.FC = () => {
           <div>
             <div className="relative h-72 sm:h-80 rounded-xl overflow-hidden bg-[#E4EBE0]">
               {currentPhoto ? (
-                <img
-                  src={currentPhoto.url}
-                  alt={currentPhoto.caption}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover"
-                />
+                /\.(mp4|webm|mov)(\?.*)?$/i.test(currentPhoto.url) ? (
+                  <video
+                    src={currentPhoto.url}
+                    controls
+                    className="w-full h-full object-cover bg-black"
+                  />
+                ) : (
+                  <img
+                    src={currentPhoto.url}
+                    alt={currentPhoto.caption}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
+                )
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-xs text-[#77796F]">
                   No property photos uploaded yet
@@ -1460,24 +1488,35 @@ export const PropertyProfilePage: React.FC = () => {
             </button>
             <button
               type="button"
-              onClick={() => {
+              onClick={async () => {
                 if (!newPhotoUrl.trim()) {
                   notify('Provide an image URL or upload a file', 'error');
                   return;
                 }
-                updateDb(
-                  (prev) =>
-                    crmService.addPropertyImage(
-                      prev,
-                      property.id,
-                      newPhotoUrl.trim(),
-                      newPhotoCaption.trim()
-                    ),
-                  'Photo added'
-                );
-                setNewPhotoUrl('');
-                setNewPhotoCaption('');
-                setPhotoModalOpen(false);
+                try {
+                  await apiClient.addPropertyMedia(property.id, {
+                    url: newPhotoUrl.trim(),
+                    caption: newPhotoCaption.trim(),
+                    is_primary: images.length === 0,
+                    media_type: 'photo',
+                  });
+                  updateDb(
+                    (prev) =>
+                      crmService.addPropertyImage(
+                        prev,
+                        property.id,
+                        newPhotoUrl.trim(),
+                        newPhotoCaption.trim()
+                      ),
+                    'Photo added'
+                  );
+                  await refreshDb();
+                  setNewPhotoUrl('');
+                  setNewPhotoCaption('');
+                  setPhotoModalOpen(false);
+                } catch (err: any) {
+                  notify(err.message || 'Failed to add photo', 'error');
+                }
               }}
               className="px-4 py-2 text-xs font-medium rounded-lg bg-[#064E3B] text-[#FFFFFF] cursor-pointer"
             >
