@@ -14,11 +14,32 @@ import {
   User,
 } from '../types/crm';
 
-const rawBase = import.meta.env.VITE_API_BASE_URL !== undefined
-  ? import.meta.env.VITE_API_BASE_URL
-  : import.meta.env.VITE_API_URL;
-const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const API_BASE = (rawBase !== undefined ? rawBase : (isLocal ? 'http://localhost:8000' : '')).replace(/\/+$/, '');
+function resolveApiBase(): string {
+  const envBase = (
+    import.meta.env.VITE_API_BASE_URL ??
+    import.meta.env.VITE_API_URL ??
+    ''
+  ).trim();
+
+  if (envBase) {
+    // Strip trailing slashes and any trailing '/api' segment so endpoints starting with '/api/...' do not duplicate
+    return envBase.replace(/\/+$/, '').replace(/\/api\/?$/, '');
+  }
+
+  // If no environment variable is provided, check if running in a local browser context
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '0.0.0.0';
+    if (isLocal) {
+      // Direct call to local FastAPI backend; falls back to Vite proxy if port 8000 is on same origin
+      return 'http://127.0.0.1:8000';
+    }
+  }
+
+  return '';
+}
+
+const API_BASE = resolveApiBase();
 const TOKEN_KEY = 'crm_access_token';
 const REFRESH_KEY = 'crm_refresh_token';
 
@@ -78,15 +99,24 @@ class ApiClient {
     formData.append('username', username);
     formData.append('password', password);
 
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: formData.toString(),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: formData.toString(),
+      });
+    } catch {
+      const targetUrl = `${API_BASE || (typeof window !== 'undefined' ? window.location.origin : '')}/api/auth/login`;
+      throw new Error(`Unable to reach authentication server at ${targetUrl}. Please ensure the backend is running.`);
+    }
 
     if (!res.ok) {
+      if (res.status === 404) {
+        throw new Error(`Authentication endpoint not found (HTTP 404). Check API base URL configuration (${API_BASE || 'relative'}).`);
+      }
       const err = await res.json().catch(() => ({ detail: 'Login failed' }));
-      throw new Error(err.detail || 'Login failed');
+      throw new Error(err.detail || 'Invalid credentials or inactive account.');
     }
 
     const data = await res.json();

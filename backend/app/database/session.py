@@ -19,10 +19,12 @@ from sqlalchemy.orm import sessionmaker, Session
 
 from app.core.config import settings
 
+from sqlalchemy.engine.url import make_url
+
 logger = logging.getLogger(__name__)
 
 def sanitize_db_url(url: str) -> str:
-    """Normalize and fix common database URL issues (e.g. Render's postgres:// or empty port :/ )."""
+    """Normalize and fix common database URL issues (e.g. Render's postgres://, empty port :/, or missing SSL)."""
     if not url:
         return url
     url = url.strip().strip("'\"")
@@ -34,10 +36,17 @@ def sanitize_db_url(url: str) -> str:
 
     # Fix empty port like @host:/dbname -> @host:5432/dbname
     if "@" in url:
-        prefix, rest = url.split("@", 1)
+        prefix, rest = url.rsplit("@", 1)
         if ":/" in rest:
             rest = rest.replace(":/", ":5432/", 1)
         url = prefix + "@" + rest
+
+    # Enforce sslmode=require for Render-hosted PostgreSQL connections if not explicitly set
+    if "postgresql" in url and "render.com" in url:
+        if "sslmode=" not in url:
+            separator = "&" if "?" in url else "?"
+            url = f"{url}{separator}sslmode=require"
+
     return url
 
 database_url = sanitize_db_url(settings.DATABASE_URL)
@@ -120,6 +129,54 @@ def validate_database_connection() -> bool:
     except SQLAlchemyError as exc:
         logger.critical("Unexpected database error during startup: %s", exc)
         raise RuntimeError("Unexpected database error during startup.") from exc
+
+
+def get_db_diagnostic_info(target_url: str = None) -> dict:
+    """
+    Returns sanitized connection metadata without exposing passwords or private credentials.
+    Safe for diagnostic endpoints, health checks, and logs.
+    """
+    url_to_parse = target_url or database_url
+    try:
+        parsed = make_url(url_to_parse)
+        raw_host = parsed.host or ("file" if parsed.get_backend_name() == "sqlite" else "unknown")
+        if len(raw_host) > 14 and "." in raw_host:
+            # Mask host: e.g. dpg-c1234567.oregon-postgres.render.com -> dpg-c***render.com
+            prefix = raw_host[:5]
+            domain = raw_host.split(".", 1)[-1]
+            masked_host = f"{prefix}***.{domain}"
+        elif raw_host not in ("localhost", "127.0.0.1", "file"):
+            masked_host = f"{raw_host[:2]}***"
+        else:
+            masked_host = raw_host
+
+        raw_user = parsed.username or "none"
+        if len(raw_user) > 3:
+            masked_user = f"{raw_user[:2]}***"
+        elif raw_user != "none":
+            masked_user = "***"
+        else:
+            masked_user = "none"
+
+        query_params = dict(parsed.query) if parsed.query else {}
+
+        return {
+            "dialect": parsed.get_backend_name(),
+            "driver": parsed.get_driver_name(),
+            "masked_host": masked_host,
+            "port": parsed.port or (5432 if "postgres" in parsed.get_backend_name() else None),
+            "database": parsed.database or "default",
+            "masked_username": masked_user,
+            "sslmode": query_params.get("sslmode", "not specified"),
+            "is_sqlite": parsed.get_backend_name() == "sqlite",
+            "is_postgres": "postgres" in parsed.get_backend_name(),
+        }
+    except Exception as exc:
+        return {
+            "error": f"Failed to parse database URL: {exc}",
+            "is_sqlite": str(url_to_parse).startswith("sqlite"),
+            "is_postgres": "postgres" in str(url_to_parse),
+        }
 
 
 def get_db() -> Generator[Session, None, None]:

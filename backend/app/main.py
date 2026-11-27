@@ -29,7 +29,7 @@ from app.api.routes.admin_submissions import router as admin_submissions_router
 from app.core.config import settings
 from app.core.security import get_password_hash, validate_admin_password_strength
 from app.database.base import Base
-from app.database.session import SessionLocal, engine, validate_database_connection
+from app.database.session import SessionLocal, engine, validate_database_connection, get_db_diagnostic_info
 from app.models.models import SequenceCounter, User
 
 import logging
@@ -156,7 +156,18 @@ app.include_router(admin_submissions_router)
 
 @app.get("/api/health", tags=["Health"])
 def health_check():
-    return {"status": "ok", "app": settings.PROJECT_NAME}
+    db_diag = get_db_diagnostic_info()
+    return {
+        "status": "ok",
+        "app": settings.PROJECT_NAME,
+        "database": {
+            "dialect": db_diag.get("dialect"),
+            "masked_host": db_diag.get("masked_host"),
+            "database": db_diag.get("database"),
+            "sslmode": db_diag.get("sslmode"),
+            "is_postgres": db_diag.get("is_postgres"),
+        },
+    }
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
